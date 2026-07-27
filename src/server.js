@@ -5,10 +5,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import cron from 'node-cron';
 
+dotenv.config();
+process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
+
 import apiRoutes from './routes/api.js';
 import { runScraperJob } from './scrapers/index.js';
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
