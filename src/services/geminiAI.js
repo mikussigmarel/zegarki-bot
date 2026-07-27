@@ -2,22 +2,35 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 /**
+ * Tekstowy pre-filter niesprawności przed analizą AI
+ */
+export function checkTextIsWorkingStatus(text) {
+  if (!text) return { isDefinitelyNotWorking: false };
+  const lower = text.toLowerCase();
+  const brokenWords = ['uszkodzony', 'uszkodzona', 'nie działa', 'niedziała', 'na części', 'do naprawy', 'nie chodzi', 'stojący', 'stojacy', 'złom', 'zlom', 'bateria do wymiany', 'brak balansu', 'uszkodzony mechanizm', 'niesprawny', 'niesprawna'];
+  const isDefinitelyNotWorking = brokenWords.some(w => lower.includes(w));
+  return { isDefinitelyNotWorking };
+}
+
+/**
  * Zapytanie do potężnego, darmowego silnika Groq AI (groq.com)
- * Używa ultraszybkiej rotacji modeli (llama-3.1-8b-instant, llama-3.3-70b-versatile, mixtral-8x7b-32768, gemma2-9b-it)
- * Jeśli jeden model osiągnie limit, NATYCHMIAST przełącza się na kolejny wolny model w 0 milisekund (BEZ CZEKANIA 60s!).
+ * Używa rotacji aktywnych darmowych modeli:
+ * 1. llama-3.1-8b-instant (20,000 TPM limit, 100ms)
+ * 2. llama3-70b-8192
+ * 3. llama-3.3-70b-versatile
+ * 4. qwen-2.5-coder-32b
  */
 async function callGroqAI(prompt) {
   const groqKey = process.env.GROQ_API_KEY;
   if (!groqKey) return null;
 
-  // Przycięcie promptu do 2000 znaków (zabezpieczenie limitu tokenów TPM)
   const cleanPrompt = prompt.length > 2000 ? prompt.slice(0, 2000) + '...' : prompt;
 
   const models = [
-    process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
-    'llama-3.3-70b-versatile',
-    'mixtral-8x7b-32768',
-    'gemma2-9b-it'
+    'llama-3.1-8b-instant',
+    'llama3-70b-8192',
+    process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    'qwen-2.5-coder-32b'
   ];
 
   for (const modelName of models) {
@@ -45,9 +58,8 @@ async function callGroqAI(prompt) {
       }
 
       const errTxt = await res.text();
-      // Jeśli błąd to 429 (Rate Limit), NATYCHMIAST przełącz na kolejny wolny model w tablicy (0s czekania!)
       if (res.status === 429 || errTxt.includes('429') || errTxt.includes('rate_limit') || errTxt.includes('Rate limit')) {
-        console.warn(`⚡ [GROQ ROTATION] Model ${modelName} osiągnął limit (429). Natychmiastowe przełączenie na kolejny model...`);
+        console.warn(`⚡ [GROQ ROTATION] Model ${modelName} osiągnął limit (429). Przełączenie na kolejny wolny model...`);
         continue;
       }
 
