@@ -96,7 +96,7 @@ export async function scrapeCatawikiWatches() {
   const searchTerms = ['watch', 'zegarek', 'seiko', 'omega', 'tissot'];
 
   for (const term of searchTerms) {
-    if (results.length >= 25) break;
+    if (results.length >= 60) break;
     try {
       const url = `https://www.catawiki.com/en/s?q=${encodeURIComponent(term)}&sort=closing_soon`;
       let res = await fetchWithTimeout(url, { headers: secHeaders }, 4000);
@@ -120,7 +120,7 @@ export async function scrapeCatawikiWatches() {
       const data = JSON.parse(jsonMatch[1]);
       const lots = data.props?.pageProps?.searchLots?.lots || [];
 
-      const candidateLots = lots.slice(0, 8);
+      const candidateLots = lots.slice(0, 20);
 
       const lotPromises = candidateLots.map(async (lot) => {
         const lotId = String(lot.id);

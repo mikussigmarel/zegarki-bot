@@ -1,5 +1,6 @@
 import { scrapeCatawikiWatches } from './catawiki.js';
 import { scrapeAllegroWatches } from './allegro.js';
+import { scrapeOlxWatches } from './olx.js';
 import { analyzeWatchOffer } from '../services/geminiAI.js';
 import { getMarketPriceEstimate, evaluateBuyingDecision } from './priceEvaluator.js';
 import { sendWatchAlert } from '../services/telegramBot.js';
@@ -27,9 +28,10 @@ export async function runScraperJob(forceAll = false) {
   try {
     const catawikiOffers = await scrapeCatawikiWatches();
     const allegroOffers = await scrapeAllegroWatches();
+    const olxOffers = await scrapeOlxWatches();
 
-    const allOffers = [...catawikiOffers, ...allegroOffers];
-    console.log(`🔎 Znaleziono łącznie ${allOffers.length} realnych ofert na żywo.`);
+    const allOffers = [...catawikiOffers, ...allegroOffers, ...olxOffers];
+    console.log(`🔎 Znaleziono łącznie ${allOffers.length} realnych ofert na żywo (Catawiki + Allegro + OLX).`);
 
     for (const rawOffer of allOffers) {
       // 1. Filtr budżetowy: 100 PLN do 3000 PLN
@@ -58,7 +60,13 @@ export async function runScraperJob(forceAll = false) {
         sellerCountry: rawOffer.sellerCountry,
         shippingCost: rawOffer.shippingCost
       });
-      console.log(`📋 Wynik Gemini: ${aiData.marka} ${aiData.model} | Ref: ${aiData.nr_referencyjny || 'Brak'} | Stan: ${aiData.stan} | FullSet: ${aiData.full_set} | Sprawny: ${aiData.sprawny}`);
+      console.log(`📋 Wynik Gemini: ${aiData.marka} ${aiData.model} | Ref: ${aiData.nr_referencyjny || 'Brak'} | Stan: ${aiData.stan} | FullSet: ${aiData.full_set} | Podróbka: ${aiData.czy_podrobka_lub_replika || false}`);
+
+      // 🛡 ANTY-PODRÓBKA / REPLIKA DISCARD: Odrzuć natychmiast fakes i podróbki!
+      if (aiData.czy_podrobka_lub_replika || aiData.prawdopodobna_oryginalnosc?.includes('Podróbka') || aiData.stan?.includes('Podróbka')) {
+        console.log(`🚨 [ANTI-FAKE DISCARD] Odrzucono ofertę z powodu wykrytej repliki/podróbki: "${rawOffer.title}" (${aiData.uwagi_ai})`);
+        continue;
+      }
 
       // 4. Moduł wyceny rynkowej
       const marketPrice = await getMarketPriceEstimate(aiData.marka, aiData.model, aiData.nr_referencyjny, aiData);

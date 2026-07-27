@@ -567,6 +567,7 @@
               <td>
                 <div style="font-weight: 600;">${z.marka}</div>
                 <div style="font-size: 13px; color: var(--text-muted);">${z.model}</div>
+                ${z.link_oferty ? `<a href="${z.link_oferty}" target="_blank" style="font-size: 11px; color: var(--accent-gold); text-decoration: none;">🔗 Link do oferty</a>` : ''}
               </td>
               <td><code>${z.nr_referencyjny || 'Brak'}</code></td>
               <td><span class="badge ${badgeClass}">${statusText}</span></td>
@@ -577,7 +578,7 @@
                 <div class="actions-cell">
                   ${z.status === 'KUPIONY_W_DRODZE' ? `<button class="btn btn-secondary" onclick="updateStatus('${z.id}', 'NA_STANIE')">📥 Odbierz</button>` : ''}
                   ${z.status !== 'SPRZEDANY' ? `<button class="btn btn-primary" onclick="openSellModal('${z.id}')">💰 Sprzedano</button>` : ''}
-                  <button class="btn btn-secondary" onclick="deleteWatch('${z.id}')" style="color: #ef4444;">🗑️</button>
+                  <button class="btn btn-secondary" onclick="deleteWatch('${z.id}')" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3);" title="Usuń z bazy">🗑️ Usuń</button>
                 </div>
               </td>
             </tr>
@@ -656,7 +657,7 @@
     }
 
     async function deleteWatch(id) {
-      if (confirm('Czy na pewno chcesz usunąć ten zegarek z bazy?')) {
+      if (confirm('Czy na pewno chcesz usunąć ten zegarek z bazy magazynowej?')) {
         await fetch(`/api/zegarki/${id}`, { method: 'DELETE' });
         loadWatches();
         loadStats();
@@ -665,22 +666,30 @@
 
     async function triggerScan() {
       const btn = document.getElementById('btn-scan');
-      btn.innerText = '⏳ Skanowanie...';
+      btn.innerText = '⏳ Skanowanie w toku (Catawiki + Allegro + OLX)...';
+      btn.disabled = true;
       try {
         await fetch('/api/scrape/trigger', { method: 'POST' });
         setTimeout(() => {
           btn.innerText = '⚡ Skanuj Aukcje Teraz';
+          btn.disabled = false;
           loadWatches();
           loadStats();
-        }, 3000);
+        }, 8000);
       } catch (e) {
         btn.innerText = '⚡ Skanuj Aukcje Teraz';
+        btn.disabled = false;
       }
     }
 
-    // Pierwsze załadowanie danych
+    // Pierwsze załadowanie danych oraz automatyczny auto-refresh co 8 sekund!
     loadStats();
     loadWatches();
+
+    setInterval(() => {
+      loadStats();
+      loadWatches();
+    }, 8000);
   </script>
 </body>
 </html>

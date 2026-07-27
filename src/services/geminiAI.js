@@ -23,21 +23,45 @@ if (apiKey && apiKey !== 'AQ.Ab8RN6JqyM...') {
  */
 export async function analyzeWatchOffer(title, description, imageUrl = null, extraInfo = {}) {
   const countryText = extraInfo.sellerCountry ? `\nKraj wysyłki sprzedawcy ze strony: ${extraInfo.sellerCountry}` : '';
-  const shippingText = extraInfo.shippingCost ? `\nRealny koszt dostawy ze strony: ${extraInfo.shippingCost} PLN` : '';
   const combinedText = `Tytuł: ${title}\nOpis: ${description || ''}${countryText}${shippingText}`;
+  // 🛡 PRE-FILTER ANTY-PODRÓBKA (Reguła słów kluczowych)
+  const lowerText = combinedText.toLowerCase();
+  const fakeKeywords = ['replika', 'replica', 'podróbka', 'podrobka', 'podróba', 'klon', 'fake', 'reprodukt', 'hommage fake'];
+  const hasFakeKeyword = fakeKeywords.some(kw => lowerText.includes(kw));
+
+  // Anomalia cenowa luksusowych marek (Rolex/Omega za 200 zł = 100% podróba)
+  const isLuxuryFakeAnomaly = (lowerText.includes('rolex') || lowerText.includes('breitling') || lowerText.includes('tudor')) && !lowerText.includes('homage') && (title.includes('200') || title.includes('300') || title.includes('150'));
+
+  if (hasFakeKeyword || isLuxuryFakeAnomaly) {
+    console.warn(`🚨 [ANTI-FAKE PRE-FILTER] Wykryto ewidentną podróbkę/replikę w ofercie: "${title}"`);
+    return {
+      marka: parseBrandFallback(title),
+      model: title,
+      nr_referencyjny: null,
+      aiEstimatedPrice: 0,
+      stan: 'Podróbka / Replika',
+      full_set: false,
+      papiery: false,
+      pudelko: false,
+      sprawny: false,
+      czy_podrobka_lub_replika: true,
+      prawdopodobna_oryginalnosc: 'Podróbka / Replika',
+      czy_opis_wiarygodny: false,
+      uwagi_ai: '🚨 Odrzucono: Wykryto ewidentną replikę/podróbkę zegarka!'
+    };
+  }
 
   if (genAI) {
     try {
       const prompt = `Jesteś bezwzględnym, doświadczonym rzeczoznawcą i fliperem zegarków w Polsce (budżet 100 PLN - 3000 PLN). Twój cel to podanie SUCHEJ, REALNEJ WARTOŚCI RYNKOWEJ W POLSCE (ze szczególnym uwzględnieniem realiów POLSKIEGO RYNKU WTÓRNEGO: Allegro, Chrono24 Polska, OLX), aby użytkownik NIE PRZEPŁACIŁ ani grosza i mógł zyskowo odprzedać zegarek w Polsce.
 
+🛡 KRYTYCZNA ZASADA BEZPIECZEŃSTWA (BEZWZGLĘDNA WERYFIKACJA AUTENTYCZNOŚCI I JAKOŚCI OPISU):
+1. ANTY-PODRÓBKA: Jeśli widzisz markę Rolex, Omega, Breitling, Tudor itp. oferowaną za śmieszne kwoty (np. 150-500 PLN) lub zegarek wyglądający na tanią replikę z Chin, MUSISZ oznaczyć "czy_podrobka_lub_replika": true i "prawdopodobna_oryginalnosc": "Podróbka / Replika".
+2. JAKOŚĆ OPISU: Jeśli opis to zaledwie jedno słowo/zdanie (np. "sprzedam zegarek"), brak szczegółów lub opis wydaje się podejrzany, oznacz "czy_opis_wiarygodny": false.
+
 ZASADA BEZWZGLĘDNEJ WYCENY POD POLSKI RYNEK (STAN + KOMPLETACJA):
 Wyceniaj zegarek biorąc pod uwagę specyfikę i popyt na POLSKIM RYNKU (PLN). Zegarki Seiko, Tissot, Orient, Casio, Citizen czy vintage Omegi mają na polskim rynku sprecyzowane realia cenowe.
 Musisz połączyć stan wizualny/mechaniczny Z KOMPLETEM w jedną spójną polską cenę rynkową.
-Przykłady kombinacji:
-- Zegarek używany/porysowany + Full Set z certyfikatem => Szacujesz cenę rynkową dokładnie dla używanego egzemplarza w zestawie z Full Setem.
-- Zegarek niesprawny/do serwisu + z pudełkiem/papierami => Szacujesz cenę rynkową uszkodzonego zegarka z tym kompletem.
-- Zegarek idealny/nienoszony + sam zegarek (brak pudełka/papierów) => Szacujesz cenę rynkową dla idealnego zegarka bez kompletu.
-- Zegarek niesprawny + sam zegarek => Szacujesz wartość dawcy części / do naprawy bez kompletu.
 
 Zwróć JEDYNIE czysty format JSON (bez markdown \`\`\`json):
 {
@@ -50,7 +74,10 @@ Zwróć JEDYNIE czysty format JSON (bez markdown \`\`\`json):
   "papiery": true/false (true jeśli są papiery/certyfikat/gwarancja),
   "pudelko": true/false (true jeśli jest oryginalne pudełko),
   "sprawny": true/false (true jeśli sprawny na chodzie, false jeśli uszkodzony),
-  "uwagi_ai": "Krótkie, konkretne uzasadnienie wyceny kombinacji (np. 'Model w stanie używanym z rysami, ale obecny Full Set i certyfikat trzyma cenę rynkową na poziomie 1400 PLN')"
+  "czy_podrobka_lub_replika": true/false (true jeśli to podróbka/replika/fake),
+  "prawdopodobna_oryginalnosc": "Wysoka" / "Podejrzana" / "Podróbka / Replika",
+  "czy_opis_wiarygodny": true/false (false jeśli opis to zaledwie parę słów lub ściema),
+  "uwagi_ai": "Krótkie uzasadnienie wyceny oraz oceny oryginalności"
 }
 
 Dane aukcji:
