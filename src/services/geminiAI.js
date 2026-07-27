@@ -42,6 +42,96 @@ function switchToNextKey() {
 }
 
 /**
+ * Zapytanie do ultraszybkiego darmowego silnika Groq AI (groq.com - 30 RPM, Llama 3.2 Vision)
+ */
+async function callGroqAI(prompt, base64Data = null, mimeType = 'image/jpeg') {
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) return null;
+
+  const modelName = process.env.GROQ_MODEL || 'llama-3.2-11b-vision-instruct';
+
+  const content = [];
+  content.push({ type: 'text', text: prompt });
+
+  if (base64Data) {
+    content.push({
+      type: 'image_url',
+      image_url: {
+        url: `data:${mimeType};base64,${base64Data}`
+      }
+    });
+  }
+
+  console.log(`🚀 [GROQ AI] Zapytanie do superszybkiego silnika Groq (${modelName})...`);
+
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${groqKey}`
+    },
+    body: JSON.stringify({
+      model: modelName,
+      messages: [{ role: 'user', content }],
+      temperature: 0.1
+    }),
+    signal: AbortSignal.timeout(15000)
+  });
+
+  if (!res.ok) {
+    throw new Error(`Groq API Error (${res.status}): ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+/**
+ * Zapytanie do uniwersalnego węzła OpenRouter API (openrouter.ai)
+ */
+async function callOpenRouterAI(prompt, base64Data = null, mimeType = 'image/jpeg') {
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  if (!openRouterKey) return null;
+
+  const modelName = process.env.OPENROUTER_MODEL || 'nvidia/nemotron-nano-12b-v2-vl:free';
+
+  const content = [];
+  content.push({ type: 'text', text: prompt });
+
+  if (base64Data) {
+    content.push({
+      type: 'image_url',
+      image_url: {
+        url: `data:${mimeType};base64,${base64Data}`
+      }
+    });
+  }
+
+  console.log(`🌐 [OPENROUTER AI] Zapytanie do darmowego silnika OpenRouter (${modelName})...`);
+
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${openRouterKey}`
+    },
+    body: JSON.stringify({
+      model: modelName,
+      messages: [{ role: 'user', content }],
+      temperature: 0.1
+    }),
+    signal: AbortSignal.timeout(30000)
+  });
+
+  if (!res.ok) {
+    throw new Error(`OpenRouter API Error (${res.status}): ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+/**
  * Solidne pobieranie obrazu z 2 próbami i nagłówkami przeglądarki, zapobiegające błędom i wiszeniu.
  */
 async function fetchImageAsBase64(imageUrl) {
@@ -88,8 +178,10 @@ export async function analyzeWatchOffer(title, description, imageUrl = null, ext
 
   const useLocalAI = process.env.USE_LOCAL_AI === 'true';
   const hasGeminiKeys = apiKeys.length > 0;
+  const hasGroqKey = Boolean(process.env.GROQ_API_KEY);
+  const hasOpenRouterKey = Boolean(process.env.OPENROUTER_API_KEY);
 
-  if (useLocalAI || hasGeminiKeys) {
+  if (useLocalAI || hasGeminiKeys || hasGroqKey || hasOpenRouterKey) {
     try {
       const prompt = `Jesteś bezwzględnym, doświadczonym rzeczoznawcą i fliperem zegarków w Polsce (budżet 100 PLN - 3000 PLN). Twoim JEDYNYM zadaniem jest PRECYZYJNA IDENTYFIKACJA MODELU, WERYFIKACJA SPRAWNOŚCI MECHANICZNEJ, OCENA AUTENTYCZNOŚCI I STANU KOMPLETACJI zegarka. NIE WYCENIASZ CENY – cenę rynkową wyliczy osobny moduł z prawdziwych ofert na portalach.
 
@@ -145,10 +237,26 @@ ${combinedText}`;
       let responseText = '';
 
       if (useLocalAI) {
-        // Zapytanie do lokalnego AI (Ollama)
+        // 1. Zapytanie do lokalnego AI (Ollama na localhost / serwerze)
         responseText = await callLocalAI(prompt, base64Data, mimeType);
-      } else {
-        // Zapytanie do chmurowego Gemini API – "Maksowanie jednego klucza aż do 429, potem przejście na kolejny klucz z tą samą ofertą"
+      } else if (process.env.GROQ_API_KEY) {
+        // 2. Zapytanie do ultraszybkiego silnika Groq AI (groq.com)
+        try {
+          responseText = await callGroqAI(prompt, base64Data, mimeType);
+        } catch (gErr) {
+          console.warn('⚠️ Groq AI zwrócił błąd, przełączanie na Gemini/OpenRouter:', gErr.message);
+        }
+      } else if (process.env.OPENROUTER_API_KEY) {
+        // 3. Zapytanie do silnika OpenRouter (openrouter.ai)
+        try {
+          responseText = await callOpenRouterAI(prompt, base64Data, mimeType);
+        } catch (orErr) {
+          console.warn('⚠️ OpenRouter zwrócił błąd, przełączanie na Gemini:', orErr.message);
+        }
+      }
+
+      if (!responseText) {
+        // 4. Zapytanie do chmurowego Gemini API – "Maksowanie jednego klucza aż do 429, potem przejście na kolejny klucz z tą samą ofertą"
         const contents = [prompt];
         if (base64Data) {
           contents.push({
@@ -190,18 +298,18 @@ ${combinedText}`;
                 if (geminiInstance.totalKeys > 1) {
                   // Wykorzystano limit na aktywnym kluczu -> zmień aktywny klucz na następny w pętli i ponów tę samą ofertę!
                   switchToNextKey();
-                  await new Promise(res => setTimeout(res, 500));
+                  await new Promise(res => setTimeout(res, 600));
                 } else {
-                  console.warn(`⏳ [RATE LIMIT 429] Klucz #${geminiInstance.keyIndex} przeciążony. Odczekanie 5s na zwolnienie limitu...`);
-                  await new Promise(res => setTimeout(res, 5000));
+                  console.warn(`⏳ [RATE LIMIT 429] Klucz #${geminiInstance.keyIndex} przeciążony. Odczekanie 10s na zwolnienie limitu...`);
+                  await new Promise(res => setTimeout(res, 10000));
                 }
               }
             }
           }
 
           if (!success && outerAttempts < 8) {
-            console.warn(`⏳ [CZEKANIE NA QUOTA] Wszystkie klucze i modele chwilowo przeciążone. Odczekanie 5 sekund i ponowienie próby dla tej samej oferty (próba ${outerAttempts}/8)...`);
-            await new Promise(res => setTimeout(res, 5000));
+            console.warn(`⏳ [CZEKANIE NA QUOTA] Wszystkie klucze i modele chwilowo przeciążone. Odczekanie 10 sekund i ponowienie próby dla tej samej oferty (próba ${outerAttempts}/8)...`);
+            await new Promise(res => setTimeout(res, 10000));
           }
         }
 
