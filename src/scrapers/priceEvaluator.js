@@ -49,15 +49,16 @@ export function evaluateBuyingDecision({
   marginFactor = 0.7,
   sprawny = true
 }) {
+  const totalCost = currentPrice + shippingCost + commission;
+  const profitMargin = Math.round(marketAvgPrice - totalCost);
   const maxOffer = Math.round((marketAvgPrice * marginFactor) - shippingCost - commission);
 
-  const isCheapEnough = currentPrice < maxOffer;
-
-  // STRICT REQUIREMENT: Zostalo <= 300 minut (5 godzin)
+  // STRICT REQUIREMENT: Zostało <= 300 minut (5 godzin)
   const isEndingSoon = timeLeftMin !== undefined && timeLeftMin !== null && timeLeftMin <= 300;
 
-  const shouldBuyAlert = isCheapEnough && isEndingSoon && (sprawny !== false || (marketAvgPrice - currentPrice) > 800);
-  const profitMargin = Math.round(marketAvgPrice - currentPrice - shippingCost - commission);
+  // Wysyłaj alert gdy aukcja kończy się w ciągu 5 godzin ORAZ daje realny zysk netto (min. 50 PLN po opłatach i dostawie)
+  const isProfitable = profitMargin >= 50 || currentPrice < maxOffer;
+  const shouldBuyAlert = isEndingSoon && isProfitable && sprawny !== false;
 
   return {
     shouldBuyAlert,
