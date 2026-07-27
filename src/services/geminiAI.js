@@ -25,44 +25,22 @@ export async function analyzeWatchOffer(title, description, imageUrl = null, ext
   const countryText = extraInfo.sellerCountry ? `\nKraj wysyłki sprzedawcy ze strony: ${extraInfo.sellerCountry}` : '';
   const shippingText = extraInfo.shippingCost ? `\nRealny koszt dostawy ze strony: ${extraInfo.shippingCost} PLN` : '';
   const combinedText = `Tytuł: ${title}\nOpis: ${description || ''}${countryText}${shippingText}`;
-  // 🛡 PRE-FILTER ANTY-PODRÓBKA (Reguła słów kluczowych)
-  const lowerText = combinedText.toLowerCase();
-  const fakeKeywords = ['replika', 'replica', 'podróbka', 'podrobka', 'podróba', 'klon', 'fake', 'reprodukt', 'hommage fake'];
-  const hasFakeKeyword = fakeKeywords.some(kw => lowerText.includes(kw));
-
-  // Anomalia cenowa luksusowych marek (Rolex/Omega za 200 zł = 100% podróba)
-  const isLuxuryFakeAnomaly = (lowerText.includes('rolex') || lowerText.includes('breitling') || lowerText.includes('tudor')) && !lowerText.includes('homage') && (title.includes('200') || title.includes('300') || title.includes('150'));
-
-  if (hasFakeKeyword || isLuxuryFakeAnomaly) {
-    console.warn(`🚨 [ANTI-FAKE PRE-FILTER] Wykryto ewidentną podróbkę/replikę w ofercie: "${title}"`);
-    return {
-      marka: parseBrandFallback(title),
-      model: title,
-      nr_referencyjny: null,
-      aiEstimatedPrice: 0,
-      stan: 'Podróbka / Replika',
-      full_set: false,
-      papiery: false,
-      pudelko: false,
-      sprawny: false,
-      czy_podrobka_lub_replika: true,
-      prawdopodobna_oryginalnosc: 'Podróbka / Replika',
-      czy_opis_wiarygodny: false,
-      uwagi_ai: '🚨 Odrzucono: Wykryto ewidentną replikę/podróbkę zegarka!'
-    };
-  }
 
   if (genAI) {
     try {
       const prompt = `Jesteś bezwzględnym, doświadczonym rzeczoznawcą i fliperem zegarków w Polsce (budżet 100 PLN - 3000 PLN). Twój cel to podanie SUCHEJ, REALNEJ WARTOŚCI RYNKOWEJ W POLSCE (ze szczególnym uwzględnieniem realiów POLSKIEGO RYNKU WTÓRNEGO: Allegro, Chrono24 Polska, OLX), aby użytkownik NIE PRZEPŁACIŁ ani grosza i mógł zyskowo odprzedać zegarek w Polsce.
 
-🛡 KRYTYCZNA ZASADA BEZPIECZEŃSTWA (BEZWZGLĘDNA WERYFIKACJA AUTENTYCZNOŚCI I JAKOŚCI OPISU):
-1. ANTY-PODRÓBKA: Jeśli widzisz markę Rolex, Omega, Breitling, Tudor itp. oferowaną za śmieszne kwoty (np. 150-500 PLN) lub zegarek wyglądający na tanią replikę z Chin, MUSISZ oznaczyć "czy_podrobka_lub_replika": true i "prawdopodobna_oryginalnosc": "Podróbka / Replika".
-2. JAKOŚĆ OPISU: Jeśli opis to zaledwie jedno słowo/zdanie (np. "sprzedam zegarek"), brak szczegółów lub opis wydaje się podejrzany, oznacz "czy_opis_wiarygodny": false.
+🛡 KRYTYCZNA ZASADA BEZPIECZEŃSTWA (BEZWZGLĘDNA WERYFIKACJA AUTENTYCZNOŚCI I VISION AI):
+1. WERYFIKACJA ZDJĘCIA (VISION AI): Spójrz na tarczę i wykonanie zegarka na zdjęciu. Jeśli tarcza/zdjęcie przedstawia luksusowy zegarek (np. Rolex Submariner, Omega, Breitling, Tudor, Tag Heuer, Patek, Cartier itp.), a cena oferty wynosi poniżej 1500 PLN lub w tytule wpisano ogólnik typu "Elegancki zegarek męski", MUSISZ BEZWZGLĘDNIE OZNACZYĆ "czy_podrobka_lub_replika": true, "prawdopodobna_oryginalnosc": "Podróbka / Replika" oraz "czy_opis_wiarygodny": false!
+2. BEZMARKOWY CHŁAM I REPLIKI FASHION: Jeśli zegarek to tani no-name z Chin, podróbka fashion (np. Smael, Skmei, Geneva, Curren, Bisset) lub opis ma zaledwie 1 niekonkretne zdanie bez szczegółów, oznacz "czy_podrobka_lub_replika": true oraz "czy_opis_wiarygodny": false!
 
-ZASADA BEZWZGLĘDNEJ WYCENY POD POLSKI RYNEK (STAN + KOMPLETACJA):
-Wyceniaj zegarek biorąc pod uwagę specyfikę i popyt na POLSKIM RYNKU (PLN). Zegarki Seiko, Tissot, Orient, Casio, Citizen czy vintage Omegi mają na polskim rynku sprecyzowane realia cenowe.
-Musisz połączyć stan wizualny/mechaniczny Z KOMPLETEM w jedną spójną polską cenę rynkową.
+ZASADA DYNAMICZNEJ AUTONOMICZNEJ WYCENY AI (100% BEZ REGUŁ I SZTYWNYCH WZORCÓW):
+Przeanalizuj dokładnie markę, model, nr referencyjny, stan wizualno-mechaniczny oraz obecność oryginalnego pudełka i papierów.
+
+🌐 ZASADA UŚREDNIENIA CEN Z WIELU STRON (MULTI-SOURCE GOOGLE SEARCH):
+1. PRZESZUKAJ WIELE PORTALI: Użyj wyszukiwania Google na żywo, aby sprawdzić ceny z WIELE PORTALI jednocześnie (Chrono24 PL, Allegro, OLX, eBay Polska).
+2. ODRZUĆ SKRAJNOŚCI: Absolutnie odrzuć pojedyncze absurdalnie drogie oferty (np. skrajne ceny z Chrono24) oraz tanie podejrzane sztuki.
+3. WYLICZ MEDIANĘ / ŚREDNIĄ REALNĄ: Podaj jako "sugerowana_szacunkowa_wartosc_pln" WYŁĄCZNIE zrównoważoną średnią (najczęstszą cenę rynkową w PLN), za jaką ten konkretny model w tym konkretnym stanie i komplecie faktycznie sprzedaje się w Polsce.
 
 Zwróć JEDYNIE czysty format JSON (bez markdown \`\`\`json):
 {
@@ -103,7 +81,17 @@ ${combinedText}`;
         } catch (imgErr) {}
       }
 
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
+      const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+      let model;
+      try {
+        model = genAI.getGenerativeModel({
+          model: modelName,
+          tools: [{ googleSearch: {} }]
+        });
+      } catch (mErr) {
+        model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      }
+
       const result = await model.generateContent(contents);
       const responseText = result.response.text() ? result.response.text().trim() : '';
       const cleanJsonStr = responseText.replace(/```json\s*|\s*```/g, '').trim();
@@ -119,6 +107,9 @@ ${combinedText}`;
         papiery: Boolean(parsed.papiery),
         pudelko: Boolean(parsed.pudelko),
         sprawny: parsed.sprawny !== undefined ? Boolean(parsed.sprawny) : true,
+        czy_podrobka_lub_replika: Boolean(parsed.czy_podrobka_lub_replika) || (parsed.stan && parsed.stan.toLowerCase().includes('podróbka')),
+        prawdopodobna_oryginalnosc: parsed.prawdopodobna_oryginalnosc || (parsed.czy_podrobka_lub_replika ? 'Podróbka / Replika' : 'Wysoka'),
+        czy_opis_wiarygodny: parsed.czy_opis_wiarygodny !== undefined ? Boolean(parsed.czy_opis_wiarygodny) : true,
         uwagi_ai: parsed.uwagi_ai || 'Ścisła analiza kombinacji stanu i kompletu'
       };
     } catch (err) {
@@ -126,9 +117,13 @@ ${combinedText}`;
     }
   }
 
-  const isSet = combinedText.toLowerCase().includes('box') || combinedText.toLowerCase().includes('pudełko');
-  const hasPapers = combinedText.toLowerCase().includes('paper') || combinedText.toLowerCase().includes('papiery') || combinedText.toLowerCase().includes('certyfikat');
-  const isWorking = !combinedText.toLowerCase().includes('uszkodzony') && !combinedText.toLowerCase().includes('niesprawny');
+  const lower = combinedText.toLowerCase();
+  const hasNegativePapers = lower.includes('brak papierów') || lower.includes('brak dokumentów') || lower.includes('bez papierów') || lower.includes('bez dokumentów') || lower.includes('no papers') || lower.includes('sam zegarek');
+  const hasPapers = (lower.includes('papiery') || lower.includes('dokument') || lower.includes('certyfikat') || lower.includes('gwarancj')) && !hasNegativePapers;
+
+  const hasNegativeBox = lower.includes('brak pudełka') || lower.includes('bez pudełka') || lower.includes('sam zegarek') || lower.includes('no box');
+  const isSet = (lower.includes('pudełko') || lower.includes('box')) && !hasNegativeBox;
+  const isWorking = !lower.includes('uszkodzony') && !lower.includes('niesprawny') && !lower.includes('do naprawy');
 
   return {
     marka: parseBrandFallback(title),
@@ -140,7 +135,10 @@ ${combinedText}`;
     papiery: hasPapers,
     pudelko: isSet,
     sprawny: isWorking,
-    uwagi_ai: isWorking ? 'Mechanizm sprawny' : 'Zegarek niesprawny'
+    czy_podrobka_lub_replika: false,
+    prawdopodobna_oryginalnosc: 'Wysoka',
+    czy_opis_wiarygodny: true,
+    uwagi_ai: isWorking ? 'Mechanizm sprawny (Fallback)' : 'Zegarek niesprawny'
   };
 }
 

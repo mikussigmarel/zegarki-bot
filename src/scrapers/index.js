@@ -63,9 +63,9 @@ export async function runScraperJob(forceAll = false) {
         });
         console.log(`📋 Wynik Gemini: ${aiData.marka} ${aiData.model} | Ref: ${aiData.nr_referencyjny || 'Brak'} | Stan: ${aiData.stan} | FullSet: ${aiData.full_set} | Podróbka: ${aiData.czy_podrobka_lub_replika || false}`);
 
-        // 🛡 ANTY-PODRÓBKA / REPLIKA DISCARD: Odrzuć natychmiast fakes i podróbki!
-        if (aiData.czy_podrobka_lub_replika || aiData.prawdopodobna_oryginalnosc?.includes('Podróbka') || aiData.stan?.includes('Podróbka')) {
-          console.log(`🚨 [ANTI-FAKE DISCARD] Odrzucono ofertę z powodu wykrytej repliki/podróbki: "${rawOffer.title}" (${aiData.uwagi_ai})`);
+        // 🛡 ANTY-PODRÓBKA / REPLIKA DISCARD: Odrzuć natychmiast fakes, podróbki oraz niewiarygodne opisy!
+        if (aiData.czy_podrobka_lub_replika || aiData.czy_opis_wiarygodny === false || aiData.prawdopodobna_oryginalnosc?.includes('Podróbka') || aiData.stan?.includes('Podróbka') || (aiData.marka?.toLowerCase().includes('rolex') && rawOffer.currentPrice < 3000)) {
+          console.log(`🚨 [ANTI-FAKE DISCARD] Odrzucono ofertę z powodu wykrytej repliki/podróbki lub niewiarygodnego opisu: "${rawOffer.title}" (${aiData.uwagi_ai})`);
           continue;
         }
 
