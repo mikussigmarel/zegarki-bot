@@ -90,23 +90,34 @@ ${combinedText}`;
         } catch (imgErr) {}
       }
 
-      const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
-      const model = genAI.getGenerativeModel({ model: modelName });
-
+      const preferredModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+      const modelsToTry = [preferredModel, 'gemini-1.5-flash'];
       let result = null;
-      let maxRetries = 3;
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          result = await model.generateContent(contents);
-          break;
-        } catch (apiErr) {
-          const isRateLimit = apiErr.message?.includes('429') || apiErr.message?.includes('quota') || apiErr.status === 429;
-          if (isRateLimit && attempt < maxRetries) {
-            const waitSec = attempt * 5;
-            console.warn(`⏳ [RATE LIMIT 429] Przekroczono darmowy limit zapytań Gemini. Czekanie ${waitSec}s...`);
-            await new Promise(res => setTimeout(res, waitSec * 1000));
-          } else {
-            throw apiErr;
+
+      for (const mName of modelsToTry) {
+        if (result) break;
+        const model = genAI.getGenerativeModel({ model: mName });
+        const maxRetries = 3;
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            result = await model.generateContent(contents);
+            break;
+          } catch (apiErr) {
+            const isRateLimit = apiErr.message?.includes('429') || apiErr.message?.includes('quota') || apiErr.status === 429;
+            if (isRateLimit) {
+              if (attempt < maxRetries) {
+                const waitSec = attempt * 8; // 8s, 16s, 24s
+                console.warn(`⏳ [RATE LIMIT 429] Przekroczono limit zapytań Gemini (${mName}). Czekanie ${waitSec}s... (próba ${attempt}/${maxRetries})`);
+                await new Promise(res => setTimeout(res, waitSec * 1000));
+              } else if (mName !== modelsToTry[modelsToTry.length - 1]) {
+                console.warn(`⚠️ [RATE LIMIT 429] Przełączanie z modelu ${mName} na model zapasowy ${modelsToTry[1]}...`);
+              } else {
+                throw apiErr;
+              }
+            } else {
+              throw apiErr;
+            }
           }
         }
       }

@@ -183,12 +183,19 @@ export async function sendWatchAlert(offer) {
   const totalCost = offer.currentPrice + offer.shippingCost + commissionVal;
   const netProfit = (offer.marketAvgPrice - totalCost).toFixed(2);
 
-  const caption = `🔥 *OKAZJA ZEGAREK (Budżet 100 - 3000 PLN)* 🔥
+  let platformBadge = '🟢 *[CATAWIKI]* (Zielone)';
+  if (offer.platform === 'Allegro') {
+    platformBadge = '🟡 *[ALLEGRO]* (Żółte)';
+  } else if (offer.platform === 'OLX') {
+    platformBadge = '🔵 *[OLX]* (Niebieskie)';
+  }
+
+  const caption = `${platformBadge} 🔥 *OKAZJA ZEGAREK (Budżet 100 - 3000 PLN)* 🔥
 
 ⌚ *${offer.marka} ${offer.model}*
 🔢 Ref: \`${offer.nr_referencyjny || 'Rozpoznano po wyglądzie'}\`
 📅 Rok / Era: *${eraBadge}* | 🔋 Mechanizm: *${mechanismBadge}*
-✨ Stan: *${offer.stan}* | 🏛 Platforma: *${offer.platform}*
+✨ Stan: *${offer.stan}* | 🏛 Platforma: ${platformBadge}
 
 📋 *SZCZEGÓŁY WERYFIKACJI:*
 ⚙️ Sprawny/Chód: ${sprawnyBadge}

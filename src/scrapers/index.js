@@ -51,11 +51,16 @@ export async function runScraperJob(forceAll = false) {
       return true;
     });
 
-    // Sortuj kandydatów: oferty kończące się najszybciej priorytetowo
-    validCandidates.sort((a, b) => (a.timeLeftMin || 999) - (b.timeLeftMin || 999));
-    
-    // Ogranicz do max 30 najbardziej obiecujących okazji w jednym cyklu
-    const selectedBatch = validCandidates.slice(0, 30);
+    // Sortuj kandydatów: ZAWSZE pierwotnie oferty z Catawiki i Allegro, a OLX na końcu
+    validCandidates.sort((a, b) => {
+      const priorityA = (a.platform === 'Catawiki' || a.platform === 'Allegro') ? 1 : 2;
+      const priorityB = (b.platform === 'Catawiki' || b.platform === 'Allegro') ? 1 : 2;
+      if (priorityA !== priorityB) return priorityA - priorityB;
+      return (a.timeLeftMin || 999) - (b.timeLeftMin || 999);
+    });
+
+    // Ogranicz do max 20 najbardziej obiecujących okazji w jednym cyklu
+    const selectedBatch = validCandidates.slice(0, 20);
     console.log(`🎯 Wyselekcjonowano ${selectedBatch.length} czystych kandydatów do analizy AI.`);
 
     for (const rawOffer of selectedBatch) {
@@ -65,8 +70,8 @@ export async function runScraperJob(forceAll = false) {
         console.log(`\n--------------------------------------------------`);
         console.log(`🤖 Analiza AI dla oferty: "${rawOffer.title}" (${rawOffer.platform}, ${rawOffer.currentPrice} PLN)...`);
 
-        // Mały odstęp czasu (1.2s), aby nie przekraczać limitu 15 RPM w Gemini
-        await new Promise(r => setTimeout(r, 1200));
+        // Odstęp czasu (4.5s), aby bezwzględnie przestrzegać darmowego limitu 15 RPM w Gemini API
+        await new Promise(r => setTimeout(r, 4500));
 
         // 4. Analiza AI kombinacji stanu, rocznika, mechanizmu, wyposażenia oraz wyciągniętej ze strony dostawy
         const aiData = await analyzeWatchOffer(rawOffer.title, rawOffer.rawDescription, rawOffer.imageUrl, {

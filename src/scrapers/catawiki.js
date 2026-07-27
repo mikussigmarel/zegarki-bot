@@ -28,28 +28,58 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
   }
 }
 
+
 /**
- * Wyciąga REALNE dane ze strony oferty: czas zakończenia, kraj sprzedawcy oraz dokładną cenę dostawy.
+ * Wyciąga REALNE dane ze strony oferty: cena aktualnego bida (EUR), czas zakończenia, kraj sprzedawcy oraz dokładną cenę dostawy.
  */
-async function getRealLotDetails(lotUrl) {
+async function getRealLotDetails(lotUrl, fallbackBuyNow = null) {
   try {
     let res = await fetchWithTimeout(lotUrl, { headers: secHeaders }, 3500);
     if (!res || !res.ok) {
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(lotUrl)}`;
       res = await fetchWithTimeout(proxyUrl, { headers: secHeaders }, 3500);
     }
-    if (!res || !res.ok) return { timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75, descriptionText: '' };
+    if (!res || !res.ok) return { currentPriceEUR: fallbackBuyNow, timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75, descriptionText: '' };
     const html = await res.text();
 
     let timeLeftMin = null;
     let sellerCountry = 'Unia Europejska';
     let shippingCostPLN = 75;
     let descriptionText = '';
+    let currentPriceEUR = null;
 
     const jsonMatch = html.match(/<script\s+id="__NEXT_DATA__"\s+type="application\/json"\s*>([\s\S]*?)<\/script>/i);
     if (jsonMatch) {
       const data = JSON.parse(jsonMatch[1]);
-      const str = JSON.stringify(data.props?.pageProps);
+      const pageProps = data.props?.pageProps || {};
+      const str = JSON.stringify(pageProps);
+
+      // 💰 Wyciągnięcie REALNEJ aktualnej ceny (Current Bid w EUR - cenę aktualnego bida)
+      const bbr = pageProps.biddingBlockResponse;
+      if (bbr) {
+        if (typeof bbr.localizedCurrentBidAmount === 'number' && bbr.localizedCurrentBidAmount > 0) {
+          currentPriceEUR = bbr.localizedCurrentBidAmount;
+        } else if (bbr.live?.lot?.bid?.EUR && bbr.live.lot.bid.EUR > 0) {
+          currentPriceEUR = bbr.live.lot.bid.EUR;
+        } else if (bbr.biddingHistory?.bids?.[0]?.localizedBidAmount && bbr.biddingHistory.bids[0].localizedBidAmount > 0) {
+          currentPriceEUR = bbr.biddingHistory.bids[0].localizedBidAmount;
+        } else if (typeof bbr.localizedStartBidAmount === 'number' && bbr.localizedStartBidAmount > 0) {
+          currentPriceEUR = bbr.localizedStartBidAmount;
+        } else if (typeof bbr.localizedMinBidAmount === 'number' && bbr.localizedMinBidAmount > 0) {
+          currentPriceEUR = bbr.localizedMinBidAmount;
+        }
+      }
+
+      if (!currentPriceEUR) {
+        const curBidMatch = str.match(/"localizedCurrentBidAmount":\s*([\d.]+)/i) || 
+                            str.match(/"bid":\{"EUR":\s*([\d.]+)/i) || 
+                            str.match(/"localizedBidAmount":\s*([\d.]+)/i) || 
+                            str.match(/"localizedStartBidAmount":\s*([\d.]+)/i) || 
+                            str.match(/"price_eur":\s*([\d.]+)/i);
+        if (curBidMatch && curBidMatch[1]) {
+          currentPriceEUR = parseFloat(curBidMatch[1]);
+        }
+      }
 
       // ⏱ Czas zakończenia
       const endMatch = str.match(/"biddingEndTime":"([^"]+)"/i) || str.match(/"bidding_end_time":"([^"]+)"/i) || str.match(/"closedAt":"([^"]+)"/i);
@@ -87,14 +117,18 @@ async function getRealLotDetails(lotUrl) {
       }
     }
 
-    return { timeLeftMin, sellerCountry, shippingCostPLN, descriptionText };
+    if (!currentPriceEUR && fallbackBuyNow) {
+      currentPriceEUR = fallbackBuyNow;
+    }
+
+    return { currentPriceEUR, timeLeftMin, sellerCountry, shippingCostPLN, descriptionText };
   } catch (e) {
-    return { timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75, descriptionText: '' };
+    return { currentPriceEUR: fallbackBuyNow, timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75, descriptionText: '' };
   }
 }
 
 /**
- * Pancerne skanowanie Catawiki z wyciąganiem realnego kraju sprzedawcy i realnej dostawy ze strony.
+ * Pancerne skanowanie Catawiki z wyciąganiem realnej ceny bida, kraju sprzedawcy i realnej dostawy ze strony.
  */
 export async function scrapeCatawikiWatches() {
   console.log('🔍 [CATAWIKI SCRAPER] Skanowanie realnych aukcji na żywo z Catawiki...');
@@ -139,14 +173,12 @@ export async function scrapeCatawikiWatches() {
         const title = lot.title || 'Zegarek Catawiki';
         const fullLink = lot.url ? (lot.url.startsWith('http') ? lot.url : `https://www.catawiki.com${lot.url}`) : `https://www.catawiki.com/en/l/${lotId}`;
         const imageUrl = lot.originalImageUrl || lot.thumbImageUrl || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop';
+        const fallbackBuyNow = lot.buyNow?.price_eur || lot.buyNowPrice || null;
 
-        // Wyciągnij REALNĄ cenę: aktualna licytacja > kup teraz > cena startowa
-        const currentBid = lot.currentBidAmount || lot.currentBid?.amount || lot.currentBid?.price_eur || lot.currentBid;
-        const startPrice = lot.startPrice || lot.minimumBid || lot.openingBid;
-        const buyNowPrice = lot.buyNow?.price_eur || lot.buyNowPrice;
-        const lotPrice = lot.price || lot.currentPrice;
-        const priceEUR = parseFloat(currentBid) || parseFloat(lotPrice) || parseFloat(buyNowPrice) || parseFloat(startPrice) || null;
-        
+        // 🛍 WYCIĄGANIE REALNYCH DANYCH Z AUKCJI: CENA BIDA, CZAS, KRAJ SPRZEDAWCY, KOSZT DOSTAWY, OPIS
+        const details = await getRealLotDetails(fullLink, fallbackBuyNow);
+        const priceEUR = details.currentPriceEUR;
+
         if (!priceEUR || isNaN(priceEUR) || priceEUR <= 0) {
           console.warn(`⚠️ [CATAWIKI] Nie udało się wyciągnąć ceny dla: "${title}" - pomijam`);
           return null;
@@ -154,9 +186,6 @@ export async function scrapeCatawikiWatches() {
         const currentPricePLN = Math.round(priceEUR * eurRate);
         // Prowizja Catawiki liczona od ceny EUR (9% + 13 PLN stała opłata)
         const commissionPLN = Math.round(priceEUR * 0.09 * eurRate) + 13;
-
-        // 🛍 WYCIĄGANIE REALNYCH DANYCH Z AUKCJI: CZAS, KRAJ SPRZEDAWCY, KOSZT DOSTAWY, OPIS
-        const details = await getRealLotDetails(fullLink);
 
         return {
           id: `cw_live_${lotId}`,
@@ -185,3 +214,4 @@ export async function scrapeCatawikiWatches() {
   console.log(`✅ [CATAWIKI] Pozyskano ${results.length} realnych aukcji z prawdziwym czasem i realną dostawą!`);
   return results;
 }
+
