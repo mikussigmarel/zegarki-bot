@@ -9,11 +9,16 @@ const processedOffersHistory = new Set();
 
 /**
  * Uruchamia pełną pętlę skanowania aukcji pod kątem budżetu 100 PLN - 3000 PLN i kryteriów flipowania.
+ * @param {boolean} [forceAll=false] - Wymuś wysłanie alertu nawet jeśli oferta była przetwarzana
  */
-export async function runScraperJob() {
+export async function runScraperJob(forceAll = false) {
   if (isJobRunning) {
     console.log('⏳ Skanowanie już trwa. Pomijanie tego cyklu...');
     return;
+  }
+
+  if (forceAll) {
+    processedOffersHistory.clear();
   }
 
   isJobRunning = true;
@@ -27,13 +32,14 @@ export async function runScraperJob() {
     console.log(`🔎 Znaleziono łącznie ${allOffers.length} aktualnych ofert.`);
 
     for (const rawOffer of allOffers) {
-      // 1. Weryfikacja przedziału cenowego: 100 PLN - 3000 PLN
+      // Weryfikacja przedziału cenowego: 100 PLN - 3000 PLN
       if (rawOffer.currentPrice < 100 || rawOffer.currentPrice > 3000) {
         console.log(`⏭️ Pomijanie oferty poza budżetem 100-3000 PLN (Cena: ${rawOffer.currentPrice} PLN): "${rawOffer.title}"`);
         continue;
       }
 
-      if (processedOffersHistory.has(rawOffer.id)) {
+      if (!forceAll && processedOffersHistory.has(rawOffer.id)) {
+        console.log(`⏭️ Pomijanie już przetworzonej oferty: "${rawOffer.title}"`);
         continue;
       }
       processedOffersHistory.add(rawOffer.id);
@@ -62,7 +68,7 @@ export async function runScraperJob() {
       console.log(`🎯 Wycena: Cena = ${rawOffer.currentPrice} PLN, Max Oferta = ${evaluation.maxOffer} PLN, Zysk = ${evaluation.profitMargin} PLN`);
 
       // 5. Powiadomienie Telegram ze zdjęciem i listą weryfikacji
-      if (evaluation.shouldBuyAlert || rawOffer.id.includes('demo') || rawOffer.currentPrice < evaluation.maxOffer) {
+      if (evaluation.shouldBuyAlert || forceAll || rawOffer.id.includes('demo') || rawOffer.currentPrice < evaluation.maxOffer) {
         console.log(`⚡ WARUNKI SPEŁNIONE! Wysyłanie oryginalnego zdjęcia i alertu na Telegram...`);
         const fullOffer = {
           ...rawOffer,

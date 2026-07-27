@@ -279,8 +279,8 @@ router.get('/stats', async (req, res) => {
 // POST /api/scrape/trigger - Wywołanie skanowania aukcji na żądanie
 router.post('/scrape/trigger', async (req, res) => {
   try {
-    // Wywołanie pętli w tle
-    runScraperJob().catch(err => console.error('Błąd tle scrapingu:', err));
+    // Wywołanie pętli w tle z czyszczeniem pamięci podręcznej (forceAll = true)
+    runScraperJob(true).catch(err => console.error('Błąd tle scrapingu:', err));
     res.json({ success: true, message: 'Skanowanie aukcji uruchomione w tle!' });
   } catch (err) {
     res.status(500).json({ error: 'Błąd uruchamiania skanowania: ' + err.message });
