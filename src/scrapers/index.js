@@ -59,8 +59,8 @@ export async function runScraperJob(forceAll = false) {
       return (a.timeLeftMin || 999) - (b.timeLeftMin || 999);
     });
 
-    // Ogranicz do max 20 najbardziej obiecujących okazji w jednym cyklu
-    const selectedBatch = validCandidates.slice(0, 20);
+    // Analizuj WSZYSTKICH spełniających kryteria kandydatów bez sztucznych kagańców/limitów ilościowych!
+    const selectedBatch = validCandidates;
     console.log(`🎯 Wyselekcjonowano ${selectedBatch.length} czystych kandydatów do analizy AI.`);
 
     for (const rawOffer of selectedBatch) {

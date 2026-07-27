@@ -3,15 +3,106 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const apiKey = process.env.GEMINI_API_KEY;
-let genAI = null;
+// Pula kluczy API (obsługa rotacji wielu kluczy z rozdzieleniem przecinkami)
+let apiKeys = [];
+let currentKeyIndex = 0;
 
-if (apiKey && apiKey !== 'AQ.Ab8RN6JqyM...') {
-  try {
-    genAI = new GoogleGenerativeAI(apiKey);
-  } catch (e) {
-    console.warn('⚠️ Gemini AI client initialization error:', e.message);
+function initGeminiKeys() {
+  const envKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
+  apiKeys = envKeys
+    .split(',')
+    .map(k => k.trim())
+    .filter(k => k && k.length > 5);
+
+  if (apiKeys.length > 0) {
+    console.log(`🔑 [GEMINI AI] Zarejestrowano ${apiKeys.length} klucz(e) API do rotacji.`);
   }
+}
+initGeminiKeys();
+
+/**
+ * Solidne pobieranie obrazu z 2 próbami i nagłówkami przeglądarki, zapobiegające błędom i wiszeniu.
+ */
+async function fetchImageAsBase64(imageUrl) {
+  if (!imageUrl || imageUrl.includes('unsplash')) return null;
+
+  const headersList = [
+    { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' },
+    { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15' }
+  ];
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(imageUrl, {
+        headers: headersList[attempt] || headersList[0],
+        signal: AbortSignal.timeout(6000)
+      });
+      if (res.ok) {
+        const arrayBuffer = await res.arrayBuffer();
+        const base64Data = Buffer.from(arrayBuffer).toString('base64');
+        const mimeType = res.headers.get('content-type') || 'image/jpeg';
+        return { base64Data, mimeType };
+      }
+    } catch (e) {
+      if (attempt === 0) {
+        await new Promise(r => setTimeout(r, 400));
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Zwraca klient GoogleGenerativeAI z rotującej puli kluczy API
+ */
+function getNextGeminiClient() {
+  initGeminiKeys();
+  if (apiKeys.length === 0) return null;
+  const key = apiKeys[currentKeyIndex % apiKeys.length];
+  const activeIndex = (currentKeyIndex % apiKeys.length) + 1;
+  currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
+  return { client: new GoogleGenerativeAI(key), keyIndex: activeIndex, totalKeys: apiKeys.length };
+}
+
+/**
+ * Zapytanie do lokalnego AI (Ollama / LocalAI / LM Studio) działającego na Localhost lub własnym serwerze GPU
+ */
+async function callLocalAI(prompt, base64Data = null, mimeType = 'image/jpeg') {
+  const url = process.env.LOCAL_AI_URL || 'http://localhost:11434/v1/chat/completions';
+  const modelName = process.env.LOCAL_AI_MODEL || 'qwen2.5-vl';
+
+  const content = [];
+  content.push({ type: 'text', text: prompt });
+
+  if (base64Data) {
+    content.push({
+      type: 'image_url',
+      image_url: {
+        url: `data:${mimeType};base64,${base64Data}`
+      }
+    });
+  }
+
+  console.log(`🤖 [LOKALNE AI] Wysyłanie zapytania do lokalnego serwera LLM (${modelName} na ${url})...`);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: modelName,
+      messages: [{ role: 'user', content }],
+      temperature: 0.1
+    }),
+    signal: AbortSignal.timeout(20000)
+  });
+
+  if (!res.ok) {
+    throw new Error(`Błąd odpowiedzi z lokalnego AI (HTTP ${res.status}): ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '';
 }
 
 /**
@@ -26,7 +117,10 @@ export async function analyzeWatchOffer(title, description, imageUrl = null, ext
   const shippingText = extraInfo.shippingCost ? `\nRealny koszt dostawy ze strony: ${extraInfo.shippingCost} PLN` : '';
   const combinedText = `Tytuł: ${title}\nOpis: ${description || ''}${countryText}${shippingText}`;
 
-  if (genAI) {
+  const useLocalAI = process.env.USE_LOCAL_AI === 'true';
+  const hasGeminiKeys = apiKeys.length > 0;
+
+  if (useLocalAI || hasGeminiKeys) {
     try {
       const prompt = `Jesteś bezwzględnym, doświadczonym rzeczoznawcą i fliperem zegarków w Polsce (budżet 100 PLN - 3000 PLN). Twoim JEDYNYM zadaniem jest PRECYZYJNA IDENTYFIKACJA MODELU, WERYFIKACJA SPRAWNOŚCI MECHANICZNEJ, OCENA AUTENTYCZNOŚCI I STANU KOMPLETACJI zegarka. NIE WYCENIASZ CENY – cenę rynkową wyliczy osobny moduł z prawdziwych ofert na portalach.
 
@@ -71,80 +165,97 @@ Zwróć JEDYNIE czysty format JSON (bez markdown \`\`\`json, bez żadnego dodatk
 Dane aukcji:
 ${combinedText}`;
 
-      const contents = [prompt];
+      let base64Data = null;
+      let mimeType = 'image/jpeg';
 
-      if (imageUrl && !imageUrl.includes('unsplash')) {
-        try {
-          const imageRes = await fetch(imageUrl);
-          if (imageRes.ok) {
-            const arrayBuffer = await imageRes.arrayBuffer();
-            const base64Data = Buffer.from(arrayBuffer).toString('base64');
-            const mimeType = imageRes.headers.get('content-type') || 'image/jpeg';
-            contents.push({
-              inlineData: {
-                data: base64Data,
-                mimeType: mimeType
-              }
-            });
-          }
-        } catch (imgErr) {}
+      const imgData = await fetchImageAsBase64(imageUrl);
+      if (imgData) {
+        base64Data = imgData.base64Data;
+        mimeType = imgData.mimeType;
       }
 
-      const preferredModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
-      const modelsToTry = [preferredModel, 'gemini-1.5-flash'];
-      let result = null;
+      let responseText = '';
 
-      for (const mName of modelsToTry) {
-        if (result) break;
-        const model = genAI.getGenerativeModel({ model: mName });
-        const maxRetries = 3;
+      if (useLocalAI) {
+        // Zapytanie do lokalnego AI (Ollama)
+        responseText = await callLocalAI(prompt, base64Data, mimeType);
+      } else {
+        // Zapytanie do chmurowego Gemini API (Rotacja kluczy + 12s timeout)
+        const contents = [prompt];
+        if (base64Data) {
+          contents.push({
+            inlineData: {
+              data: base64Data,
+              mimeType: mimeType
+            }
+          });
+        }
 
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          try {
-            result = await model.generateContent(contents);
-            break;
-          } catch (apiErr) {
-            const isRateLimit = apiErr.message?.includes('429') || apiErr.message?.includes('quota') || apiErr.status === 429;
-            if (isRateLimit) {
-              if (attempt < maxRetries) {
-                const waitSec = attempt * 8; // 8s, 16s, 24s
-                console.warn(`⏳ [RATE LIMIT 429] Przekroczono limit zapytań Gemini (${mName}). Czekanie ${waitSec}s... (próba ${attempt}/${maxRetries})`);
-                await new Promise(res => setTimeout(res, waitSec * 1000));
-              } else if (mName !== modelsToTry[modelsToTry.length - 1]) {
-                console.warn(`⚠️ [RATE LIMIT 429] Przełączanie z modelu ${mName} na model zapasowy ${modelsToTry[1]}...`);
+        const preferredModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+        const modelsToTry = [preferredModel, 'gemini-1.5-flash'];
+        let result = null;
+
+        for (const mName of modelsToTry) {
+          if (result) break;
+          const maxRetries = 3;
+
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            const geminiInstance = getNextGeminiClient();
+            if (!geminiInstance) throw new Error('Brak skonfigurowanego klucza GEMINI_API_KEY');
+
+            try {
+              // ⏱ ŚCISŁY TIMEOUT MODELU: Max 12 sekund na zapytanie Gemini API
+              const model = geminiInstance.client.getGenerativeModel({
+                model: mName,
+                requestOptions: { timeout: 12000 }
+              });
+
+              result = await model.generateContent(contents);
+              break;
+            } catch (apiErr) {
+              const isRateLimit = apiErr.message?.includes('429') || apiErr.message?.includes('quota') || apiErr.status === 429;
+              
+              if (isRateLimit) {
+                // Jeśli mamy więcej kluczy w puli, natychmiast przeskocz na kolejny klucz bez czekania!
+                if (geminiInstance.totalKeys > 1) {
+                  console.warn(`🔑 [ROTACJA KLUCZY] Klucz #${geminiInstance.keyIndex} przeciążony (429). Natychmiastowe przełączenie na kolejny klucz...`);
+                  await new Promise(res => setTimeout(res, 500)); // 0.5s przerwa
+                } else if (attempt < maxRetries) {
+                  const waitSec = attempt * 6; // 6s, 12s
+                  console.warn(`⏳ [RATE LIMIT 429] Klucz #${geminiInstance.keyIndex} przeciążony. Czekanie ${waitSec}s... (próba ${attempt}/${maxRetries})`);
+                  await new Promise(res => setTimeout(res, waitSec * 1000));
+                } else if (mName !== modelsToTry[modelsToTry.length - 1]) {
+                  console.warn(`⚠️ [RATE LIMIT 429] Przełączanie z modelu ${mName} na zapasowy ${modelsToTry[1]}...`);
+                } else {
+                  throw apiErr;
+                }
               } else {
                 throw apiErr;
               }
-            } else {
-              throw apiErr;
             }
           }
         }
+
+        responseText = result && result.response && result.response.text ? result.response.text().trim() : '';
       }
 
-      const responseText = result && result.response && result.response.text ? result.response.text().trim() : '';
       let cleanJsonStr = responseText.replace(/```json\s*|\s*```/g, '').trim();
 
       let parsed = {};
       try {
         parsed = JSON.parse(cleanJsonStr);
       } catch (parseErr) {
-        console.warn('⚠️ Błąd parsowania JSON z Gemini. Próba wyciągnięcia danych z surowego tekstu...');
-        // Wyciąganie JSON za pomocą regex
+        console.warn('⚠️ Błąd parsowania JSON z AI. Próba wyciągnięcia danych z surowego tekstu...');
         const jsonBlockMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
         if (jsonBlockMatch) {
           try {
-            // Usunięcie ewentualnych komentarzy inline w kodzie wygenerowanym przez AI
             const sanitized = jsonBlockMatch[0].replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
             parsed = JSON.parse(sanitized);
           } catch (e2) {}
         }
       }
 
-      // AI nie wycenia ceny – cena pochodzi z prawdziwego scrapera portali
-      // Pole sugerowana_szacunkowa_wartosc_pln jest ignorowane nawet jeśli AI je wyśle
       let extractedPrice = null;
-
       const textWorkingStatus = checkTextIsWorkingStatus(combinedText);
       const finalSprawny = textWorkingStatus.isWorking === false ? false : (parsed.sprawny !== undefined ? Boolean(parsed.sprawny) : true);
 
@@ -167,7 +278,7 @@ ${combinedText}`;
         uwagi_ai: parsed.uwagi_ai || 'Ścisła analiza kombinacji stanu, rocznika i kompletu'
       };
     } catch (err) {
-      console.warn('⚠️ Błąd zapytania Gemini AI:', err.message);
+      console.warn('⚠️ Błąd zapytania AI:', err.message);
     }
   }
 
@@ -188,7 +299,7 @@ ${combinedText}`;
     powod_niesprawnosci: fallbackCheck.isWorking ? 'Brak weryfikacji AI (Błąd zapytania/limit)' : fallbackCheck.reason,
     czy_podrobka_lub_replika: false,
     prawdopodobna_oryginalnosc: 'Niepewna (Błąd AI)',
-    czy_opis_wiarygodny: false, // 🛑 BEZPIECZEŃSTWO: Wrzucamy false, by oferta bez weryfikacji AI nie przeszła do alertu Telegrama
+    czy_opis_wiarygodny: false,
     uwagi_ai: '⚠️ Błąd połączenia z Gemini AI lub przekroczenie limitu zapytań (429). Oferta pominięta dla bezpieczeństwa.'
   };
 }
@@ -259,4 +370,3 @@ function extractRefFallback(text) {
   const match = text.match(/\b([A-Z0-9]{4,10}-[A-Z0-9]{2,6}|[0-9]{3}\.[0-9]{2}\.[0-9]{3}|[A-Z0-9]{6,12})\b/);
   return match ? match[1] : null;
 }
-
