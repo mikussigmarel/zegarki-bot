@@ -70,9 +70,6 @@ export async function runScraperJob(forceAll = false) {
         console.log(`\n--------------------------------------------------`);
         console.log(`🤖 Analiza AI dla oferty: "${rawOffer.title}" (${rawOffer.platform}, ${rawOffer.currentPrice} PLN)...`);
 
-        // Odstęp czasu (4.5s), aby bezwzględnie przestrzegać darmowego limitu 15 RPM w Gemini API
-        await new Promise(r => setTimeout(r, 4500));
-
         // Dociągnięcie pełnego opisu sprzedawcy z Allegro na żądanie dla wyselekcjonowanego kandydata
         if (rawOffer.platform === 'Allegro' && rawOffer.link) {
           const fullAllegroDesc = await fetchAllegroFullDescription(rawOffer.link);

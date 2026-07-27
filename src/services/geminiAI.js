@@ -1,99 +1,16 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
-
 dotenv.config();
 
-// Pula kluczy API (obsługa maksująca jeden klucz aż do błędu 429, po czym zmiana na kolejny)
-let apiKeys = [];
-let activeKeyIndex = 0;
-
-function initGeminiKeys() {
-  const envKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
-  apiKeys = envKeys
-    .split(',')
-    .map(k => k.trim())
-    .filter(k => k && k.length > 5);
-
-  if (apiKeys.length > 0) {
-    console.log(`🔑 [GEMINI AI] Zarejestrowano ${apiKeys.length} klucz(e) API. Rozpoczynamy pracę na Kluczu #1...`);
-  } else {
-    console.warn(`⚠️ [GEMINI AI] Brak skonfigurowanego klucza API!`);
-  }
-}
-initGeminiKeys();
-
-function getActiveGeminiClient() {
-  initGeminiKeys();
-  if (apiKeys.length === 0) return null;
-  const key = apiKeys[activeKeyIndex % apiKeys.length];
-  return {
-    client: new GoogleGenerativeAI(key),
-    keyIndex: (activeKeyIndex % apiKeys.length) + 1,
-    totalKeys: apiKeys.length
-  };
-}
-
-function switchToNextKey() {
-  if (apiKeys.length <= 1) return;
-  const oldIndex = (activeKeyIndex % apiKeys.length) + 1;
-  activeKeyIndex = (activeKeyIndex + 1) % apiKeys.length;
-  const newIndex = (activeKeyIndex % apiKeys.length) + 1;
-  console.warn(`⚡ [ZMIANA KLUCZA] Klucz #${oldIndex} wykorzystał limit zapytań (429). Przełączam bota na Klucz #${newIndex}...`);
-}
-
 /**
- * Zapytanie do ultraszybkiego darmowego silnika Groq AI (groq.com - 30 RPM, Llama 3.2 Vision)
+ * Zapytanie do darmowego silnika NVIDIA Vision AI przez OpenRouter (nvidia/nemotron-nano-12b-v2-vl:free)
  */
-async function callGroqAI(prompt, base64Data = null, mimeType = 'image/jpeg') {
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) return null;
-
-  const modelName = process.env.GROQ_MODEL || 'llama-3.2-11b-vision-instruct';
-
-  const content = [];
-  content.push({ type: 'text', text: prompt });
-
-  if (base64Data) {
-    content.push({
-      type: 'image_url',
-      image_url: {
-        url: `data:${mimeType};base64,${base64Data}`
-      }
-    });
-  }
-
-  console.log(`🚀 [GROQ AI] Zapytanie do superszybkiego silnika Groq (${modelName})...`);
-
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${groqKey}`
-    },
-    body: JSON.stringify({
-      model: modelName,
-      messages: [{ role: 'user', content }],
-      temperature: 0.1
-    }),
-    signal: AbortSignal.timeout(15000)
-  });
-
-  if (!res.ok) {
-    throw new Error(`Groq API Error (${res.status}): ${await res.text()}`);
-  }
-
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || '';
-}
-
-/**
- * Zapytanie do uniwersalnego węzła OpenRouter API (openrouter.ai)
- */
-async function callOpenRouterAI(prompt, base64Data = null, mimeType = 'image/jpeg') {
+async function callNvidiaVisionAI(prompt, base64Data = null, mimeType = 'image/jpeg') {
   const openRouterKey = process.env.OPENROUTER_API_KEY;
-  if (!openRouterKey) return null;
+  if (!openRouterKey) {
+    throw new Error('Brak skonfigurowanego klucza OPENROUTER_API_KEY w zmiennych środowiskowych!');
+  }
 
-  const modelName = process.env.OPENROUTER_MODEL || 'inclusionai/ling-3.0-flash:free';
+  const modelName = process.env.OPENROUTER_MODEL || 'nvidia/nemotron-nano-12b-v2-vl:free';
 
   const content = [];
   content.push({ type: 'text', text: prompt });
@@ -107,32 +24,73 @@ async function callOpenRouterAI(prompt, base64Data = null, mimeType = 'image/jpe
     });
   }
 
-  console.log(`🌐 [OPENROUTER AI] Zapytanie do darmowego silnika OpenRouter (${modelName})...`);
+  console.log(`🚀 [NVIDIA AI] Analizuję ofertę zegarka silnikiem ${modelName}...`);
 
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${openRouterKey}`
-    },
-    body: JSON.stringify({
-      model: modelName,
-      messages: [{ role: 'user', content }],
-      temperature: 0.1
-    }),
-    signal: AbortSignal.timeout(30000)
-  });
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openRouterKey}`
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [{ role: 'user', content }],
+          temperature: 0.1
+        }),
+        signal: AbortSignal.timeout(20000)
+      });
 
-  if (!res.ok) {
-    throw new Error(`OpenRouter API Error (${res.status}): ${await res.text()}`);
+      if (res.ok) {
+        const data = await res.json();
+        const responseContent = data.choices?.[0]?.message?.content || '';
+        if (responseContent.length > 5) {
+          return responseContent;
+        }
+      }
+
+      const errText = await res.text();
+      console.warn(`⚠️ [NVIDIA AI] Próba ${attempt}/3 nie powiodła się: ${res.status} ${errText}`);
+    } catch (e) {
+      console.warn(`⚠️ [NVIDIA AI] Próba ${attempt}/3 błąd połączenia: ${e.message}`);
+    }
+
+    if (attempt < 3) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
   }
 
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || '';
+  // Ostateczna próba w trybie czysto tekstowym w przypadku odrzucenia zdjęcia
+  if (base64Data) {
+    console.warn(`⚠️ [NVIDIA AI] Ponawianie analizy w trybie czysto tekstowym...`);
+    try {
+      const textRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openRouterKey}`
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+          temperature: 0.1
+        }),
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if (textRes.ok) {
+        const textData = await textRes.json();
+        return textData.choices?.[0]?.message?.content || '';
+      }
+    } catch (e) {}
+  }
+
+  throw new Error('NVIDIA AI nie mogło przetworzyć tej oferty.');
 }
 
 /**
- * Solidne pobieranie obrazu z 2 próbami i nagłówkami przeglądarki, zapobiegające błędom i wiszeniu.
+ * Solidne pobieranie obrazu z 2 próbami i nagłówkami przeglądarki.
  */
 async function fetchImageAsBase64(imageUrl) {
   if (!imageUrl || imageUrl.includes('unsplash')) return null;
@@ -146,7 +104,7 @@ async function fetchImageAsBase64(imageUrl) {
     try {
       const res = await fetch(imageUrl, {
         headers: headersList[attempt] || headersList[0],
-        signal: AbortSignal.timeout(6000)
+        signal: AbortSignal.timeout(4000)
       });
       if (res.ok) {
         const arrayBuffer = await res.arrayBuffer();
@@ -156,7 +114,7 @@ async function fetchImageAsBase64(imageUrl) {
       }
     } catch (e) {
       if (attempt === 0) {
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 300));
       }
     }
   }
@@ -165,51 +123,59 @@ async function fetchImageAsBase64(imageUrl) {
 }
 
 /**
- * Przeanalizuje opis oraz zdjęcie zegarka pod kątem ścisłej wyceny rynkowej kombinacji stanu wizualno-mechanicznego + kompletacji.
- * @param {string} title - Tytuł aukcji
- * @param {string} description - Opis aukcji
- * @param {string} [imageUrl] - URL oryginalnego zdjęcia aukcyjnego
- * @returns {Promise<{marka: string, model: string, nr_referencyjny: string|null, rok_produkcji_lub_era: string, rodzaj_mechanizmu: string, aiEstimatedPrice: number|null, stan: string, full_set: boolean, papiery: boolean, pudelko: boolean, sprawny: boolean, powod_niesprawnosci: string|null, uwagi_ai: string}>}
+ * Ścisły pre-check tekstu przed zapytaniem AI.
+ */
+export function checkTextIsWorkingStatus(text) {
+  if (!text) return { isDefinitelyNotWorking: false };
+  const lower = text.toLowerCase();
+  const nonWorkingPhrases = [
+    'nie działa', 'nie na chodzie', 'niesprawny', 'niesprawna', 'uszkodzony',
+    'uszkodzone', 'do naprawy', 'do serwisu', 'wymaga serwisu', 'wymaga naprawy',
+    'balans uszkodzony', 'staje', 'spóźnia', 'spoznia', 'do renowacji', 'na części',
+    'na czesci', 'do przeglądu', 'do przegladu', 'nietestowany', 'stan nieznany'
+  ];
+
+  for (const phrase of nonWorkingPhrases) {
+    if (lower.includes(phrase)) {
+      return { isDefinitelyNotWorking: true, reason: phrase };
+    }
+  }
+
+  return { isDefinitelyNotWorking: false };
+}
+
+/**
+ * Przeanalizuje opis oraz zdjęcie zegarka pod kątem ścisłej wyceny rynkowej.
  */
 export async function analyzeWatchOffer(title, description, imageUrl = null, extraInfo = {}) {
   const countryText = extraInfo.sellerCountry ? `\nKraj wysyłki sprzedawcy ze strony: ${extraInfo.sellerCountry}` : '';
   const shippingText = extraInfo.shippingCost ? `\nRealny koszt dostawy ze strony: ${extraInfo.shippingCost} PLN` : '';
   const combinedText = `Tytuł: ${title}\nOpis: ${description || ''}${countryText}${shippingText}`;
 
-  const useLocalAI = process.env.USE_LOCAL_AI === 'true';
-  const hasGeminiKeys = apiKeys.length > 0;
-  const hasGroqKey = Boolean(process.env.GROQ_API_KEY);
-  const hasOpenRouterKey = Boolean(process.env.OPENROUTER_API_KEY);
-
-  if (useLocalAI || hasGeminiKeys || hasGroqKey || hasOpenRouterKey) {
-    try {
-      const prompt = `Jesteś bezwzględnym, doświadczonym rzeczoznawcą i fliperem zegarków w Polsce (budżet 100 PLN - 3000 PLN). Twoim JEDYNYM zadaniem jest PRECYZYJNA IDENTYFIKACJA MODELU, WERYFIKACJA SPRAWNOŚCI MECHANICZNEJ, OCENA AUTENTYCZNOŚCI I STANU KOMPLETACJI zegarka. NIE WYCENIASZ CENY – cenę rynkową wyliczy osobny moduł z prawdziwych ofert na portalach.
+  try {
+    const prompt = `Jesteś bezwzględnym, doświadczonym rzeczoznawcą i fliperem zegarków w Polsce (budżet 100 PLN - 3000 PLN). Twoim JEDYNYM zadaniem jest PRECYZYJNA IDENTYFIKACJA MODELU, WERYFIKACJA SPRAWNOŚCI MECHANICZNEJ, OCENA AUTENTYCZNOŚCI I STANU KOMPLETACJI zegarka. NIE WYCENIASZ CENY – cenę rynkową wyliczy osobny moduł z prawdziwych ofert na portalach.
 
 🚨 KRYTYCZNA ZASADA #1 - BEZWZGLĘDNA WERYFIKACJA OPISU TEKSTOWEGO I SPRAWNOŚCI MECHANICZNEJ:
 1. PRZECZYTAJ OPIS TEKSTOWY SŁOWO PO SŁOWIE: Nawet jeśli zdjęcie przedstawia piękny, czysty zegarek, JEŚLI W OPISIE TEKSTOWYM LUB TYTULE podano jakikolwiek detal o braku sprawności, uszkodzeniu lub potrzebie ingerencji zegarmistrza (np. "niesprawny", "wymaga wizyty u zegarmistrza", "wymaga serwisu", "do przeglądu", "nie działa", "nie na chodzie", "staje", "spóźnia", "balans uszkodzony", "do renowacji", "na części", "nietestowany", "stan nieznany", "do naprawy"), MUSISZ BEZWZGLĘDNIE USTAWIC "sprawny": false!
 2. PODAJ POWÓD NIESPRAWNOŚCI: W polu "powod_niesprawnosci" wpisz dokładny powód podany przez sprzedawcę.
 
-🛡 KRYTYCZNA ZASADA #2 - BEZWZGLĘDNA WERYFIKACJA AUTENTYCZNOŚCI (VISION AI):
-1. WERYFIKACJA ZDJĘCIA (VISION AI): Spójrz na tarczę i wykonanie zegarka na zdjęciu. Jeśli tarcza przedstawia luksusowy zegarek (np. Rolex Submariner, Omega, Breitling, Tudor, Tag Heuer, Patek itp.), a cena oferty wynosi poniżej 1500 PLN, MUSISZ BEZWZGLĘDNIE OZNACZYĆ "czy_podrobka_lub_replika": true oraz "czy_opis_wiarygodny": false!
-2. BEZMARKOWY CHŁAM I REPLIKI FASHION: Jeśli zegarek to tani no-name z Chin lub podróbka fashion (np. Smael, Skmei, Geneva, Curren), oznacz "czy_podrobka_lub_replika": true oraz "czy_opis_wiarygodny": false!
+🛡 KRYTYCZNA ZASADA #2 - BEZWZGLĘDNA WERYFIKACJA AUTENTYCZNOŚCI:
+1. Weryfikacja podróbek / replik: Sprawdź dokładnie model i opisy. Jeśli oferta sprzedaje replikę, klona, podróbkę (np. "Rolex", "Omega", "Breitling", "Patek", "Tissot", "Seiko Mod" za rażąco niską cenę lub opis z wyraźną sugestią "replika", "tarcza zamiennik", "homage mod"), MUSISZ USTAWIC "czy_podrobka_lub_replika": true, "prawdopodobna_oryginalnosc": "Podróbka / Replika" oraz "czy_opis_wiarygodny": false!
+2. Marki Seiko Mods / Homage: Oznaczaj jako modyfikowane / nieoryginalne składaki, jeśli tarcza/koperta nie są fabryczne.
 
-🎯 KRYTYCZNA ZASADA #3 - BEZWZGLĘDNA IDENTYFIKACJA KONKRETNEGO MODELU:
-1. DOKŁADNY MODEL I REFERENCJA: Zidentyfikuj DOKŁADNĄ nazwę modelu i numer referencyjny.
-2. ROK PRODUKCJI / ERA: Zweryfikuj rocznik lub erę zegarka z opisu/zdjęcia.
-3. RODZAJ MECHANIZMU: Zweryfikuj typ mechanizmu (np. "Automatyczny", "Kwarcowy", "Nakręcany ręcznie", "Solar").
+📦 KRYTYCZNA ZASADA #3 - WERYFIKACJA ZESTAWU (PUDEŁKO I DOKUMENTY):
+1. Przeczytaj treść opisu pod kątem słów kluczowych: "pudełko", "puszka", "box", "dokumenty", "papiery", "gwarancja", "paragon", "komplet", "full set".
+2. Jeśli w opisie sprzedawca pisze że sprzedaje z pudełkiem i papierami/dokumentami, ustaw "full_set": true, "pudelko": true, "papiery": true.
+3. Jeśli brak pudełka lub papierów, ustaw odpowiednio false.
 
-📦 ANALIZA ZDJĘCIA PUDEŁKA I PAPIERÓW (VISION AI):
-- OGLĄDAJ ZDJĘCIE: Jeśli na zdjęciu widoczne jest pudełko na zegarek, MUSISZ BEZWZGLĘDNIE ustawić "pudelko": true!
-- Jeśli na zdjęciu widać dokumenty lub instrukcję/gwarancję, MUSISZ ustawić "papiery": true!
-- Ustaw "full_set": true TYLKO gdy na zdjęciu lub w opisie obecne są ZARÓWNO pudełko, JAK I papiery/gwarancja!
-
-Zwróć JEDYNIE czysty format JSON (bez markdown \`\`\`json, bez żadnego dodatkowego tekstu):
+ZWRÓĆ WYŁĄCZNIE CZYSTY POPRAWNY JSON BEZ ŻADNEGO MARKDOWNU LUB TEKSTU POBOCZNEGO (DOKŁADNIE TEN FORMAT):
 {
   "marka": "Seiko",
   "model": "Presage",
   "nr_referencyjny": "SRPD37J1",
   "rok_produkcji_lub_era": "ok. 2020",
   "rodzaj_mechanizmu": "Automatyczny",
+  "aiEstimatedPrice": null,
   "stan": "Bardzo dobry",
   "full_set": true,
   "papiery": true,
@@ -225,226 +191,69 @@ Zwróć JEDYNIE czysty format JSON (bez markdown \`\`\`json, bez żadnego dodatk
 Dane aukcji:
 ${combinedText}`;
 
-      let base64Data = null;
-      let mimeType = 'image/jpeg';
+    let base64Data = null;
+    let mimeType = 'image/jpeg';
 
-      const imgData = await fetchImageAsBase64(imageUrl);
-      if (imgData) {
-        base64Data = imgData.base64Data;
-        mimeType = imgData.mimeType;
-      }
-
-      let responseText = '';
-
-      if (useLocalAI) {
-        // 1. Zapytanie do lokalnego AI (Ollama na localhost / serwerze)
-        responseText = await callLocalAI(prompt, base64Data, mimeType);
-      } else if (process.env.GROQ_API_KEY) {
-        // 2. Zapytanie do ultraszybkiego silnika Groq AI (groq.com)
-        try {
-          responseText = await callGroqAI(prompt, base64Data, mimeType);
-        } catch (gErr) {
-          console.warn('⚠️ Groq AI zwrócił błąd, przełączanie na Gemini/OpenRouter:', gErr.message);
-        }
-      } else if (process.env.OPENROUTER_API_KEY) {
-        // 3. Zapytanie do silnika OpenRouter (openrouter.ai)
-        try {
-          responseText = await callOpenRouterAI(prompt, base64Data, mimeType);
-        } catch (orErr) {
-          console.warn('⚠️ OpenRouter zwrócił błąd, przełączanie na Gemini:', orErr.message);
-        }
-      }
-
-      if (!responseText) {
-        // 4. Zapytanie do chmurowego Gemini API – "Maksowanie jednego klucza aż do 429, potem przejście na kolejny klucz z tą samą ofertą"
-        const contents = [prompt];
-        if (base64Data) {
-          contents.push({
-            inlineData: {
-              data: base64Data,
-              mimeType: mimeType
-            }
-          });
-        }
-
-        const preferredModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
-        const modelsToTry = [preferredModel, 'gemini-2.0-flash-lite', 'gemini-1.5-flash-latest'];
-        let result = null;
-        let success = false;
-        let outerAttempts = 0;
-
-        while (!success && outerAttempts < 8) {
-          outerAttempts++;
-          for (const mName of modelsToTry) {
-            if (success) break;
-            const geminiInstance = getActiveGeminiClient();
-            if (!geminiInstance) throw new Error('Brak skonfigurowanego klucza GEMINI_API_KEY');
-
-            try {
-              const model = geminiInstance.client.getGenerativeModel({
-                model: mName,
-                requestOptions: { timeout: 15000 }
-              });
-
-              result = await model.generateContent(contents);
-              if (result && result.response) {
-                success = true;
-                break;
-              }
-            } catch (apiErr) {
-              const isRateLimit = apiErr.message?.includes('429') || apiErr.message?.includes('quota') || apiErr.status === 429;
-
-              if (isRateLimit) {
-                if (geminiInstance.totalKeys > 1) {
-                  // Wykorzystano limit na aktywnym kluczu -> zmień aktywny klucz na następny w pętli i ponów tę samą ofertę!
-                  switchToNextKey();
-                  await new Promise(res => setTimeout(res, 600));
-                } else {
-                  console.warn(`⏳ [RATE LIMIT 429] Klucz #${geminiInstance.keyIndex} przeciążony. Odczekanie 10s na zwolnienie limitu...`);
-                  await new Promise(res => setTimeout(res, 10000));
-                }
-              }
-            }
-          }
-
-          if (!success && outerAttempts < 8) {
-            console.warn(`⏳ [CZEKANIE NA QUOTA] Wszystkie klucze i modele chwilowo przeciążone. Odczekanie 10 sekund i ponowienie próby dla tej samej oferty (próba ${outerAttempts}/8)...`);
-            await new Promise(res => setTimeout(res, 10000));
-          }
-        }
-
-        responseText = result && result.response && result.response.text ? result.response.text().trim() : '';
-      }
-
-      let cleanJsonStr = responseText.replace(/```json\s*|\s*```/g, '').trim();
-
-      let parsed = {};
-      try {
-        parsed = JSON.parse(cleanJsonStr);
-      } catch (parseErr) {
-        console.warn('⚠️ Błąd parsowania JSON z AI. Próba wyciągnięcia danych z surowego tekstu...');
-        const jsonBlockMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
-        if (jsonBlockMatch) {
-          try {
-            const sanitized = jsonBlockMatch[0].replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-            parsed = JSON.parse(sanitized);
-          } catch (e2) {}
-        }
-      }
-
-      let extractedPrice = null;
-      const textWorkingStatus = checkTextIsWorkingStatus(combinedText);
-      const finalSprawny = textWorkingStatus.isWorking === false ? false : (parsed.sprawny !== undefined ? Boolean(parsed.sprawny) : true);
-
-      return {
-        marka: parsed.marka || parseBrandFallback(title),
-        model: parsed.model || title,
-        nr_referencyjny: parsed.nr_referencyjny || extractRefFallback(combinedText),
-        rok_produkcji_lub_era: parsed.rok_produkcji_lub_era || 'Nieokreślony',
-        rodzaj_mechanizmu: parsed.rodzaj_mechanizmu || 'Nieokreślony',
-        aiEstimatedPrice: extractedPrice,
-        stan: parsed.stan || (finalSprawny ? 'Bardzo dobry' : 'Niesprawny / do naprawy'),
-        full_set: Boolean(parsed.full_set),
-        papiery: Boolean(parsed.papiery),
-        pudelko: Boolean(parsed.pudelko),
-        sprawny: finalSprawny,
-        powod_niesprawnosci: !finalSprawny ? (parsed.powod_niesprawnosci || textWorkingStatus.reason || 'Wymaga naprawy / wizyty u zegarmistrza') : null,
-        czy_podrobka_lub_replika: Boolean(parsed.czy_podrobka_lub_replika) || (parsed.stan && parsed.stan.toLowerCase().includes('podróbka')),
-        prawdopodobna_oryginalnosc: parsed.prawdopodobna_oryginalnosc || (parsed.czy_podrobka_lub_replika ? 'Podróbka / Replika' : 'Wysoka'),
-        czy_opis_wiarygodny: parsed.czy_opis_wiarygodny !== undefined ? Boolean(parsed.czy_opis_wiarygodny) : true,
-        uwagi_ai: parsed.uwagi_ai || 'Ścisła analiza kombinacji stanu, rocznika i kompletu'
-      };
-    } catch (err) {
-      console.warn('⚠️ Błąd zapytania AI:', err.message);
+    const imgData = await fetchImageAsBase64(imageUrl);
+    if (imgData) {
+      base64Data = imgData.base64Data;
+      mimeType = imgData.mimeType;
     }
-  }
 
-  const fallbackCheck = checkTextIsWorkingStatus(combinedText);
+    const responseText = await callNvidiaVisionAI(prompt, base64Data, mimeType);
 
-  return {
-    marka: parseBrandFallback(title),
-    model: parseModelFallback(title),
-    nr_referencyjny: extractRefFallback(combinedText),
-    rok_produkcji_lub_era: 'Nieokreślony',
-    rodzaj_mechanizmu: 'Nieokreślony',
-    aiEstimatedPrice: null,
-    stan: fallbackCheck.isWorking ? 'Bardzo dobry (Błąd AI)' : 'Niesprawny / do naprawy',
-    full_set: false,
-    papiery: false,
-    pudelko: false,
-    sprawny: fallbackCheck.isWorking,
-    powod_niesprawnosci: fallbackCheck.isWorking ? null : fallbackCheck.reason,
-    czy_podrobka_lub_replika: false,
-    prawdopodobna_oryginalnosc: 'Wysoka (Błąd AI)',
-    czy_opis_wiarygodny: true,
-    aiError: true,
-    uwagi_ai: '⚠️ Błąd połączenia z Gemini AI lub przekroczenie limitu zapytań (429).'
-  };
-}
+    let cleanJsonStr = responseText.replace(/```json\s*|\s*```/g, '').trim();
 
-/**
- * Szuka w tekście (tytuł + opis) fraz wyraźnie wskazujących na niesprawność / potrzebę serwisu/zegarmistrza.
- */
-export function checkTextIsWorkingStatus(text) {
-  if (!text) return { isWorking: true, reason: null };
-  const lower = text.toLowerCase();
-
-  const nonWorkingPhrases = [
-    'wymaga wizyty u zegarmistrza',
-    'wizyta u zegarmistrza',
-    'u zegarmistrza',
-    'do zegarmistrza',
-    'niesprawny',
-    'uszkodzony',
-    'do naprawy',
-    'do serwisu',
-    'wymaga serwisu',
-    'wymaga przeglądu',
-    'do przeglądu',
-    'nie działa',
-    'nie na chodzie',
-    'nie chodzi',
-    'nie nakręca',
-    'staje po',
-    'spóźnia',
-    'balans uszkodzony',
-    'uszkodzony balans',
-    'stan nieznany',
-    'nietestowany',
-    'na części',
-    'do renowacji',
-    'do czyszczenia',
-    'zalany',
-    'sprzedaję jako uszkodzony',
-    'jako uszkodzony'
-  ];
-
-  for (const phrase of nonWorkingPhrases) {
-    if (lower.includes(phrase)) {
-      return {
-        isWorking: false,
-        reason: `Wykryto frazę w opisie: "${phrase}"`
-      };
+    let parsed = {};
+    try {
+      parsed = JSON.parse(cleanJsonStr);
+    } catch (parseErr) {
+      const jsonBlockMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
+      if (jsonBlockMatch) {
+        try {
+          parsed = JSON.parse(jsonBlockMatch[0]);
+        } catch (e2) {}
+      }
     }
+
+    return {
+      marka: parsed.marka || title.split(' ')[0] || 'Nieznana',
+      model: parsed.model || title,
+      nr_referencyjny: parsed.nr_referencyjny || null,
+      rok_produkcji_lub_era: parsed.rok_produkcji_lub_era || 'Nieokreślony',
+      rodzaj_mechanizmu: parsed.rodzaj_mechanizmu || 'Nieokreślony',
+      aiEstimatedPrice: null,
+      stan: parsed.stan || 'Używany',
+      full_set: Boolean(parsed.full_set),
+      papiery: Boolean(parsed.papiery),
+      pudelko: Boolean(parsed.pudelko),
+      sprawny: parsed.sprawny !== undefined ? Boolean(parsed.sprawny) : true,
+      powod_niesprawnosci: parsed.powod_niesprawnosci || null,
+      czy_podrobka_lub_replika: Boolean(parsed.czy_podrobka_lub_replika),
+      prawdopodobna_oryginalnosc: parsed.prawdopodobna_oryginalnosc || 'Nieokreślona',
+      czy_opis_wiarygodny: parsed.czy_opis_wiarygodny !== undefined ? Boolean(parsed.czy_opis_wiarygodny) : true,
+      uwagi_ai: parsed.uwagi_ai || 'Brak uwag AI.'
+    };
+  } catch (err) {
+    console.error('⚠️ Błąd zapytania NVIDIA AI:', err.message);
+    return {
+      marka: title.split(' ')[0] || 'Nieznana',
+      model: title,
+      nr_referencyjny: null,
+      rok_produkcji_lub_era: 'Nieokreślony',
+      rodzaj_mechanizmu: 'Nieokreślony',
+      aiEstimatedPrice: null,
+      stan: 'Bardzo dobry (Błąd AI)',
+      full_set: false,
+      papiery: false,
+      pudelko: false,
+      sprawny: true,
+      powod_niesprawnosci: null,
+      czy_podrobka_lub_replika: false,
+      prawdopodobna_oryginalnosc: 'Wysoka (Błąd AI)',
+      czy_opis_wiarygodny: true,
+      aiError: true,
+      uwagi_ai: `⚠️ Błąd połączenia z NVIDIA AI: ${err.message}`
+    };
   }
-
-  return { isWorking: true, reason: null };
-}
-
-function parseBrandFallback(text) {
-  const brands = ['Seiko', 'Omega', 'Tissot', 'Orient', 'Citizen', 'Casio', 'Tag Heuer', 'Longines', 'Certina', 'Hamilton'];
-  for (const b of brands) {
-    if (new RegExp(`\\b${b}\\b`, 'i').test(text)) return b;
-  }
-  return text.split(' ')[0] || 'Zegarek';
-}
-
-function parseModelFallback(text) {
-  const parts = text.split(' ');
-  return parts.slice(1, 4).join(' ') || text;
-}
-
-function extractRefFallback(text) {
-  const match = text.match(/\b([A-Z0-9]{4,10}-[A-Z0-9]{2,6}|[0-9]{3}\.[0-9]{2}\.[0-9]{3}|[A-Z0-9]{6,12})\b/);
-  return match ? match[1] : null;
 }
