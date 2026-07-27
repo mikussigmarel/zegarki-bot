@@ -15,7 +15,6 @@ if (token && token !== '123456789:ABCdef...') {
     bot = new TelegramBot(token, { polling: true });
     console.log('🤖 Telegram Bot (@Zegarki_mikusia_bot) uruchomiony w trybie Polling!');
 
-    // Automatyczne przechwytywanie Chat ID gdy użytkownik napisze /start na Telegramie
     bot.onText(/\/start/, async (msg) => {
       configuredChatId = msg.chat.id.toString();
       console.log(`✅ [TELEGRAM] Połączono z czatem użytkownika! CHAT ID: ${configuredChatId}`);
@@ -23,19 +22,21 @@ if (token && token !== '123456789:ABCdef...') {
       await bot.sendMessage(configuredChatId, `🎉 *Witaj w Bot Zegarki!*
 
 Twój bot powiadomień został pomyślnie połączony z serwerem.
-Gdy tylko system wykryje okazję na Catawiki lub Allegro, wyślę Ci zdjęcie, opis, kalkulację rynkową oraz przycisk *[🟢 KUPIŁEM]*.
+System analizuje oferty w budżecie *100 PLN – 3 000 PLN* i sprawdza:
+- 📦 Full Set (pudełko + papiery)
+- ⚙️ Sprawność mechanizmu
+- 📄 Dokumenty i gwarancję
+- 🖼️ Oryginalne zdjęcia z aukcji
 
-Zaczynamy skanowanie! ⌚🔥`, { parse_mode: 'Markdown' });
+Zaczynamy skanowanie na żywo! ⌚🔥`, { parse_mode: 'Markdown' });
     });
 
-    // Rejestracja Chat ID dla każdej wiadomości
     bot.on('message', (msg) => {
       if (msg.chat && msg.chat.id) {
         configuredChatId = msg.chat.id.toString();
       }
     });
 
-    // Obsługa kliknięcia interaktywnego przycisku [🟢 KUPIŁEM]
     bot.on('callback_query', async (query) => {
       const data = query.data;
       if (data.startsWith('buy_')) {
@@ -107,7 +108,7 @@ Zaczynamy skanowanie! ⌚🔥`, { parse_mode: 'Markdown' });
             });
           }
 
-          await bot.answerCallbackQuery(query.id, { text: '🟢 Zegarek został dodany do bazy (KUPIONY_W_DRODZE)!' });
+          await bot.answerCallbackQuery(query.id, { text: '🟢 Dodano zegarek do bazy (KUPIONY_W_DRODZE)!' });
           
           if (query.message) {
             const updatedCaption = `${query.message.caption || query.message.text}\n\n✅ *ZAKUPIONO! Dodano do bazy (Łączny koszt: ${lacznyKoszt.toFixed(2)} PLN)*`;
@@ -126,7 +127,7 @@ Zaczynamy skanowanie! ⌚🔥`, { parse_mode: 'Markdown' });
             }
           }
         } catch (err) {
-          console.error('⚠️ Błąd podczas zapisywania zakupu z Telegrama:', err);
+          console.error('⚠️ Błąd zapisywania zakupu z Telegrama:', err);
           await bot.answerCallbackQuery(query.id, { text: '⚠️ Błąd zapisu do bazy!' });
         }
       }
@@ -137,27 +138,39 @@ Zaczynamy skanowanie! ⌚🔥`, { parse_mode: 'Markdown' });
 }
 
 /**
- * Wysyła alert okazjonalny na Telegrama.
+ * Wysyła szczegółowy alert na Telegram z dokładnymi informacjami flipowania.
  * @param {Object} offer - Obiekt oferty
  */
 export async function sendWatchAlert(offer) {
   const offerId = offer.id || `offer_${Date.now()}`;
   offerCache.set(offerId, offer);
 
-  const caption = `🔥 *OKAZJA ZEGARKA!* 🔥
+  const fullSetBadge = offer.full_set ? 'TAK 📦 (Komplet)' : 'NIE ❌';
+  const papieryBadge = offer.papiery ? 'TAK 📄' : 'BRAK ❌';
+  const pudelkoBadge = offer.pudelko ? 'TAK 📦' : 'BRAK ❌';
+  const sprawnyBadge = offer.sprawny ? 'TAK ✅ (Działa)' : 'WYMAGA REPARACJI ⚠️';
+
+  const caption = `🔥 *OKAZJA ZEUGARKA (Budżet 100 - 3000 PLN)* 🔥
 
 ⌚ *${offer.marka} ${offer.model}*
-🔢 Ref: \`${offer.nr_referencyjny || 'Brak'}\`
-✨ Stan: ${offer.stan} | Full Set: ${offer.full_set ? 'TAK 📦' : 'NIE ❌'}
-🏛 Platforma: *${offer.platform}*
+🔢 Ref: \`${offer.nr_referencyjny || 'Rozpoznano po wyglądzie'}\`
+✨ Stan: *${offer.stan}* | 🏛 Platforma: *${offer.platform}*
 
+📋 *SZCZEGÓŁY WERYFIKACJI:*
+⚙️ Sprawny/Chód: ${sprawnyBadge}
+📦 Full Set: ${fullSetBadge}
+📄 Dokumenty/Gwarancja: ${papieryBadge}
+🏷️ Pudełko: ${pudelkoBadge}
+📝 *Uwagi AI*: _${offer.uwagi_ai || 'Czysta tarcza i koperta'}_
+
+💰 *FINANSE:*
 💵 Aktualna cena: *${offer.currentPrice} PLN*
 📊 Średnia rynkowa: *${offer.marketAvgPrice} PLN*
 🎯 Max Twoja oferta: *${offer.maxOffer} PLN*
-💰 Przewidywany zysk: *+${(offer.marketAvgPrice - offer.currentPrice).toFixed(2)} PLN*
+📈 *Przewidywany zysk*: *+${(offer.marketAvgPrice - offer.currentPrice).toFixed(2)} PLN*
 ⏱ Czas do końca: *${offer.timeLeftMin} min*
 
-🔗 [Zobacz ofertę na ${offer.platform}](${offer.link})`;
+🔗 [Zobacz oryginalną aukcję](${offer.link})`;
 
   const inlineKeyboard = {
     reply_markup: {
@@ -184,17 +197,13 @@ export async function sendWatchAlert(offer) {
           ...inlineKeyboard
         });
       }
-      console.log(`📱 [TELEGRAM] Alert wysłany pomyślnie do chatu ID: ${targetChatId}`);
+      console.log(`📱 [TELEGRAM] Wysłano oryginalne zdjęcie i alert dla ${offer.marka} ${offer.model}`);
       return true;
     } catch (err) {
       console.error('⚠️ Błąd wysyłania wiadomości Telegram:', err.message);
     }
   }
 
-  console.log('\n=================== 📱 SIMULATED TELEGRAM ALERT ===================');
-  console.log(caption);
-  console.log(`[PRZYCISK TELEGRAM]: [ 🟢 KUPIŁEM (buy_${offerId}) ]`);
-  console.log('===================================================================\n');
   return true;
 }
 

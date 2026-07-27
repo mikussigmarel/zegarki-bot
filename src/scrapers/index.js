@@ -8,7 +8,7 @@ let isJobRunning = false;
 const processedOffersHistory = new Set();
 
 /**
- * Uruchamia pełną pętlę skanowania aukcji: Scraping -> AI -> Wycena -> Telegram Alert.
+ * Uruchamia pełną pętlę skanowania aukcji pod kątem budżetu 100 PLN - 3000 PLN i kryteriów flipowania.
  */
 export async function runScraperJob() {
   if (isJobRunning) {
@@ -17,10 +17,9 @@ export async function runScraperJob() {
   }
 
   isJobRunning = true;
-  console.log('\n🚀 [CRON JOB] Rozpoczynanie cyklu skanowania aukcji zegarków...');
+  console.log('\n🚀 [CRON JOB] Rozpoczynanie skanowania (Budżet 100 PLN - 3 000 PLN)...');
 
   try {
-    // 1. Pobieranie ofert z platform
     const catawikiOffers = await scrapeCatawikiWatches();
     const allegroOffers = await scrapeAllegroWatches();
 
@@ -28,6 +27,12 @@ export async function runScraperJob() {
     console.log(`🔎 Znaleziono łącznie ${allOffers.length} aktualnych ofert.`);
 
     for (const rawOffer of allOffers) {
+      // 1. Weryfikacja przedziału cenowego: 100 PLN - 3000 PLN
+      if (rawOffer.currentPrice < 100 || rawOffer.currentPrice > 3000) {
+        console.log(`⏭️ Pomijanie oferty poza budżetem 100-3000 PLN (Cena: ${rawOffer.currentPrice} PLN): "${rawOffer.title}"`);
+        continue;
+      }
+
       if (processedOffersHistory.has(rawOffer.id)) {
         continue;
       }
@@ -36,12 +41,12 @@ export async function runScraperJob() {
       console.log(`\n--------------------------------------------------`);
       console.log(`🤖 Analiza AI (Gemini 1.5 Flash) dla: "${rawOffer.title}"...`);
 
-      // 2. Analiza tekstu i obrazu przez Gemini AI
+      // 2. Szpiegowska analiza AI ze zdjęcia i opisu
       const aiData = await analyzeWatchOffer(rawOffer.title, rawOffer.rawDescription, rawOffer.imageUrl);
-      console.log(`📋 Wynik Gemini: ${aiData.marka} | Model: ${aiData.model} | Ref: ${aiData.nr_referencyjny || 'Brak'} | Stan: ${aiData.stan} | FullSet: ${aiData.full_set}`);
+      console.log(`📋 Wynik Gemini: ${aiData.marka} ${aiData.model} | Ref: ${aiData.nr_referencyjny || 'Rozpoznano'} | Stan: ${aiData.stan} | FullSet: ${aiData.full_set} | Sprawny: ${aiData.sprawny}`);
 
       // 3. Moduł wyceny rynkowej
-      const marketPrice = await getMarketPriceEstimate(aiData.marka, aiData.model, aiData.nr_referencyjny);
+      const marketPrice = await getMarketPriceEstimate(aiData.marka, aiData.model, aiData.nr_referencyjny, aiData.aiEstimatedPrice);
       console.log(`📊 Estymacja rynkowa: Średnia = ${marketPrice.marketAvgPrice} PLN (Chrono24: ${marketPrice.chronoPrice}, Allegro: ${marketPrice.allegroPrice}, eBay: ${marketPrice.ebayPrice})`);
 
       // 4. Matematyka decyzyjna
@@ -54,11 +59,11 @@ export async function runScraperJob() {
         marginFactor: parseFloat(process.env.DEFAULT_MARGIN_FACTOR) || 0.7
       });
 
-      console.log(`🎯 Wynik wyceny: Aktualna cena = ${rawOffer.currentPrice} PLN, Max Oferta = ${evaluation.maxOffer} PLN, Przewidywany marża/zysk = ${evaluation.profitMargin} PLN, Czas = ${rawOffer.timeLeftMin} min`);
+      console.log(`🎯 Wycena: Cena = ${rawOffer.currentPrice} PLN, Max Oferta = ${evaluation.maxOffer} PLN, Zysk = ${evaluation.profitMargin} PLN`);
 
-      // 5. Weryfikacja warunków i powiadomienie Telegram
-      if (evaluation.shouldBuyAlert || rawOffer.id.includes('demo')) {
-        console.log(`⚡ WARUNKI SPEŁNIONE! Wysyłanie alertu okazjonalnego na Telegram...`);
+      // 5. Powiadomienie Telegram ze zdjęciem i listą weryfikacji
+      if (evaluation.shouldBuyAlert || rawOffer.id.includes('demo') || rawOffer.currentPrice < evaluation.maxOffer) {
+        console.log(`⚡ WARUNKI SPEŁNIONE! Wysyłanie oryginalnego zdjęcia i alertu na Telegram...`);
         const fullOffer = {
           ...rawOffer,
           ...aiData,
@@ -68,7 +73,7 @@ export async function runScraperJob() {
         };
         await sendWatchAlert(fullOffer);
       } else {
-        console.log(`🛑 Oferta nie spełnia kryteriów zakupu (Aktualna: ${rawOffer.currentPrice} PLN >= Max: ${evaluation.maxOffer} PLN lub Czas > 30min).`);
+        console.log(`🛑 Oferta nie spełnia kryteriów zakupu.`);
       }
     }
   } catch (err) {

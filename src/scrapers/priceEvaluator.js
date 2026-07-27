@@ -10,9 +10,9 @@
  * @param {string|null} nrReferencyjny
  * @returns {Promise<{marketAvgPrice: number, chronoPrice: number, allegroPrice: number, ebayPrice: number}>}
  */
-export async function getMarketPriceEstimate(marka, model, nrReferencyjny = null) {
+export async function getMarketPriceEstimate(marka, model, nrReferencyjny = null, aiEstimatedPrice = null) {
   // Wartości rynkowe bazowe wg popularnych modeli
-  let baseEstimate = 2500;
+  let baseEstimate = aiEstimatedPrice || 2500;
 
   const key = `${marka} ${model} ${nrReferencyjny || ''}`.toLowerCase();
 
@@ -26,6 +26,8 @@ export async function getMarketPriceEstimate(marka, model, nrReferencyjny = null
     baseEstimate = 2400;
   } else if (key.includes('tag heuer') || key.includes('carrera')) {
     baseEstimate = 6500;
+  } else if (aiEstimatedPrice && aiEstimatedPrice > 500) {
+    baseEstimate = aiEstimatedPrice;
   }
 
   // Odchylenia rynkowe dla 3 głównych platform
