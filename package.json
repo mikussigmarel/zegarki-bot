@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "postinstall": "npx playwright install chromium",
     "prisma:generate": "prisma generate",
     "prisma:db-push": "prisma db push"
   },
