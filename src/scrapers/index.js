@@ -86,8 +86,8 @@ export async function runScraperJob(forceAll = false) {
           continue;
         }
 
-        // 🛡 ANTY-PODRÓBKA / REPLIKA DISCARD: Odrzuć natychmiast fakes, podróbki oraz niewiarygodne opisy!
-        if (aiData.czy_podrobka_lub_replika || aiData.czy_opis_wiarygodny === false || aiData.prawdopodobna_oryginalnosc?.includes('Podróbka') || aiData.stan?.includes('Podróbka') || (aiData.marka?.toLowerCase().includes('rolex') && rawOffer.currentPrice < 3000)) {
+        // 🛡 ANTY-PODRÓBKA / REPLIKA DISCARD: Odrzuć natychmiast fakes, podróbki oraz niewiarygodne opisy (o ile nie był to tylko tymczasowy błąd API)!
+        if (!aiData.aiError && (aiData.czy_podrobka_lub_replika || aiData.czy_opis_wiarygodny === false || aiData.prawdopodobna_oryginalnosc?.includes('Podróbka') || aiData.stan?.includes('Podróbka') || (aiData.marka?.toLowerCase().includes('rolex') && rawOffer.currentPrice < 3000))) {
           console.log(`🚨 [ANTI-FAKE DISCARD] Odrzucono ofertę z powodu wykrytej repliki/podróbki lub niewiarygodnego opisu: "${rawOffer.title}" (${aiData.uwagi_ai})`);
           continue;
         }

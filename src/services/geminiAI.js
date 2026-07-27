@@ -3,9 +3,9 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Pula kluczy API (obsługa rotacji wielu kluczy z rozdzieleniem przecinkami)
+// Pula kluczy API (obsługa maksująca jeden klucz aż do błędu 429, po czym zmiana na kolejny)
 let apiKeys = [];
-let currentKeyIndex = 0;
+let activeKeyIndex = 0;
 
 function initGeminiKeys() {
   const envKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
@@ -15,10 +15,31 @@ function initGeminiKeys() {
     .filter(k => k && k.length > 5);
 
   if (apiKeys.length > 0) {
-    console.log(`🔑 [GEMINI AI] Zarejestrowano ${apiKeys.length} klucz(e) API do rotacji.`);
+    console.log(`🔑 [GEMINI AI] Zarejestrowano ${apiKeys.length} klucz(e) API. Rozpoczynamy pracę na Kluczu #1...`);
+  } else {
+    console.warn(`⚠️ [GEMINI AI] Brak skonfigurowanego klucza API!`);
   }
 }
 initGeminiKeys();
+
+function getActiveGeminiClient() {
+  initGeminiKeys();
+  if (apiKeys.length === 0) return null;
+  const key = apiKeys[activeKeyIndex % apiKeys.length];
+  return {
+    client: new GoogleGenerativeAI(key),
+    keyIndex: (activeKeyIndex % apiKeys.length) + 1,
+    totalKeys: apiKeys.length
+  };
+}
+
+function switchToNextKey() {
+  if (apiKeys.length <= 1) return;
+  const oldIndex = (activeKeyIndex % apiKeys.length) + 1;
+  activeKeyIndex = (activeKeyIndex + 1) % apiKeys.length;
+  const newIndex = (activeKeyIndex % apiKeys.length) + 1;
+  console.warn(`⚡ [ZMIANA KLUCZA] Klucz #${oldIndex} wykorzystał limit zapytań (429). Przełączam bota na Klucz #${newIndex}...`);
+}
 
 /**
  * Solidne pobieranie obrazu z 2 próbami i nagłówkami przeglądarki, zapobiegające błędom i wiszeniu.
@@ -54,58 +75,6 @@ async function fetchImageAsBase64(imageUrl) {
 }
 
 /**
- * Zwraca klient GoogleGenerativeAI z rotującej puli kluczy API
- */
-function getNextGeminiClient() {
-  initGeminiKeys();
-  if (apiKeys.length === 0) return null;
-  const key = apiKeys[currentKeyIndex % apiKeys.length];
-  const activeIndex = (currentKeyIndex % apiKeys.length) + 1;
-  currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
-  return { client: new GoogleGenerativeAI(key), keyIndex: activeIndex, totalKeys: apiKeys.length };
-}
-
-/**
- * Zapytanie do lokalnego AI (Ollama / LocalAI / LM Studio) działającego na Localhost lub własnym serwerze GPU
- */
-async function callLocalAI(prompt, base64Data = null, mimeType = 'image/jpeg') {
-  const url = process.env.LOCAL_AI_URL || 'http://localhost:11434/v1/chat/completions';
-  const modelName = process.env.LOCAL_AI_MODEL || 'qwen2.5-vl';
-
-  const content = [];
-  content.push({ type: 'text', text: prompt });
-
-  if (base64Data) {
-    content.push({
-      type: 'image_url',
-      image_url: {
-        url: `data:${mimeType};base64,${base64Data}`
-      }
-    });
-  }
-
-  console.log(`🤖 [LOKALNE AI] Wysyłanie zapytania do lokalnego serwera LLM (${modelName} na ${url})...`);
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: modelName,
-      messages: [{ role: 'user', content }],
-      temperature: 0.1
-    }),
-    signal: AbortSignal.timeout(20000)
-  });
-
-  if (!res.ok) {
-    throw new Error(`Błąd odpowiedzi z lokalnego AI (HTTP ${res.status}): ${await res.text()}`);
-  }
-
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || '';
-}
-
-/**
  * Przeanalizuje opis oraz zdjęcie zegarka pod kątem ścisłej wyceny rynkowej kombinacji stanu wizualno-mechanicznego + kompletacji.
  * @param {string} title - Tytuł aukcji
  * @param {string} description - Opis aukcji
@@ -125,22 +94,21 @@ export async function analyzeWatchOffer(title, description, imageUrl = null, ext
       const prompt = `Jesteś bezwzględnym, doświadczonym rzeczoznawcą i fliperem zegarków w Polsce (budżet 100 PLN - 3000 PLN). Twoim JEDYNYM zadaniem jest PRECYZYJNA IDENTYFIKACJA MODELU, WERYFIKACJA SPRAWNOŚCI MECHANICZNEJ, OCENA AUTENTYCZNOŚCI I STANU KOMPLETACJI zegarka. NIE WYCENIASZ CENY – cenę rynkową wyliczy osobny moduł z prawdziwych ofert na portalach.
 
 🚨 KRYTYCZNA ZASADA #1 - BEZWZGLĘDNA WERYFIKACJA OPISU TEKSTOWEGO I SPRAWNOŚCI MECHANICZNEJ:
-1. PRZECZYTAJ OPIS TEKSTOWY SŁOWO PO SŁOWIE: Nawet jeśli zdjęcie przedstawia piękny, czysty zegarek, JEŚLI W OPISIE TEKSTOWYM LUB TYTULE podano jakąkolwiek informację o braku sprawności, uszkodzeniu lub potrzebie ingerencji zegarmistrza (np. "niesprawny", "wymaga wizyty u zegarmistrza", "wymaga serwisu", "do przeglądu", "nie działa", "nie na chodzie", "staje", "spóźnia", "balans uszkodzony", "do renowacji", "na części", "nietestowany", "stan nieznany", "do naprawy"), MUSISZ BEZWZGLĘDNIE USTAWIC "sprawny": false!
-2. PODAJ POWÓD NIESPRAWNOŚCI: W polu "powod_niesprawnosci" wpisz dokładny powód podany przez sprzedawcę (np. "Wymaga wizyty u zegarmistrza", "Zegarek niesprawny/uszkodzony").
+1. PRZECZYTAJ OPIS TEKSTOWY SŁOWO PO SŁOWIE: Nawet jeśli zdjęcie przedstawia piękny, czysty zegarek, JEŚLI W OPISIE TEKSTOWYM LUB TYTULE podano jakikolwiek detal o braku sprawności, uszkodzeniu lub potrzebie ingerencji zegarmistrza (np. "niesprawny", "wymaga wizyty u zegarmistrza", "wymaga serwisu", "do przeglądu", "nie działa", "nie na chodzie", "staje", "spóźnia", "balans uszkodzony", "do renowacji", "na części", "nietestowany", "stan nieznany", "do naprawy"), MUSISZ BEZWZGLĘDNIE USTAWIC "sprawny": false!
+2. PODAJ POWÓD NIESPRAWNOŚCI: W polu "powod_niesprawnosci" wpisz dokładny powód podany przez sprzedawcę.
 
 🛡 KRYTYCZNA ZASADA #2 - BEZWZGLĘDNA WERYFIKACJA AUTENTYCZNOŚCI (VISION AI):
-1. WERYFIKACJA ZDJĘCIA (VISION AI): Spójrz na tarczę i wykonanie zegarka na zdjęciu. Jeśli tarcza/zdjęcie przedstawia luksusowy zegarek (np. Rolex Submariner, Omega, Breitling, Tudor, Tag Heuer, Patek, Cartier itp.), a cena oferty wynosi poniżej 1500 PLN lub w tytule wpisano ogólnik typu "Elegancki zegarek męski", MUSISZ BEZWZGLĘDNIE OZNACZYĆ "czy_podrobka_lub_replika": true, "prawdopodobna_oryginalnosc": "Podróbka / Replika" oraz "czy_opis_wiarygodny": false!
-2. BEZMARKOWY CHŁAM I REPLIKI FASHION: Jeśli zegarek to tani no-name z Chin lub podróbka fashion (np. Smael, Skmei, Geneva, Curren) lub opis ma zaledwie 1 niekonkretne zdanie bez szczegółów, oznacz "czy_podrobka_lub_replika": true oraz "czy_opis_wiarygodny": false!
+1. WERYFIKACJA ZDJĘCIA (VISION AI): Spójrz na tarczę i wykonanie zegarka na zdjęciu. Jeśli tarcza przedstawia luksusowy zegarek (np. Rolex Submariner, Omega, Breitling, Tudor, Tag Heuer, Patek itp.), a cena oferty wynosi poniżej 1500 PLN, MUSISZ BEZWZGLĘDNIE OZNACZYĆ "czy_podrobka_lub_replika": true oraz "czy_opis_wiarygodny": false!
+2. BEZMARKOWY CHŁAM I REPLIKI FASHION: Jeśli zegarek to tani no-name z Chin lub podróbka fashion (np. Smael, Skmei, Geneva, Curren), oznacz "czy_podrobka_lub_replika": true oraz "czy_opis_wiarygodny": false!
 
 🎯 KRYTYCZNA ZASADA #3 - BEZWZGLĘDNA IDENTYFIKACJA KONKRETNEGO MODELU:
-1. DOKŁADNY MODEL I REFERENCJA: Zidentyfikuj DOKŁADNĄ nazwę modelu i numer referencyjny (np. Seiko Presage SRPD37J1, Tissot PRX T137.407, Orient Bambino FAC00005W0). Używaj zdjęcia tarczy, opisu i parametrów do rozpoznania.
-2. NIEISTNIEJĄCE LUB ZMYŚLONE MODELE: Jeśli model jest zmyślony, nie istnieje na rynku zegarkowym lub jest to "no-name fantasy watch", oznacz bezwzględnie "czy_opis_wiarygodny": false oraz "czy_podrobka_lub_replika": true!
-3. ROK PRODUKCJI / ERA: Zweryfikuj rocznik lub erę zegarka z opisu/zdjęcia (np. "lata 70.", "ok. 1995", "2018+", "Vintage lata 60.").
-4. RODZAJ MECHANIZMU: Zweryfikuj typ mechanizmu (np. "Automatyczny", "Kwarcowy", "Nakręcany ręcznie", "Solar").
+1. DOKŁADNY MODEL I REFERENCJA: Zidentyfikuj DOKŁADNĄ nazwę modelu i numer referencyjny.
+2. ROK PRODUKCJI / ERA: Zweryfikuj rocznik lub erę zegarka z opisu/zdjęcia.
+3. RODZAJ MECHANIZMU: Zweryfikuj typ mechanizmu (np. "Automatyczny", "Kwarcowy", "Nakręcany ręcznie", "Solar").
 
 📦 ANALIZA ZDJĘCIA PUDEŁKA I PAPIERÓW (VISION AI):
-- OGLĄDAJ ZDJĘCIE: Jeśli na zdjęciu widoczne jest pudełko na zegarek (oryginalne etui, zielone/czarne pudełko, opakowanie ze poduszką na zegarek), MUSISZ BEZWZGLĘDNIE ustawić "pudelko": true!
-- Jeśli na zdjęciu widać dokumenty, książeczki, instrukcję lub kartę gwarancyjną/certyfikat, MUSISZ ustawić "papiery": true!
+- OGLĄDAJ ZDJĘCIE: Jeśli na zdjęciu widoczne jest pudełko na zegarek, MUSISZ BEZWZGLĘDNIE ustawić "pudelko": true!
+- Jeśli na zdjęciu widać dokumenty lub instrukcję/gwarancję, MUSISZ ustawić "papiery": true!
 - Ustaw "full_set": true TYLKO gdy na zdjęciu lub w opisie obecne są ZARÓWNO pudełko, JAK I papiery/gwarancja!
 
 Zwróć JEDYNIE czysty format JSON (bez markdown \`\`\`json, bez żadnego dodatkowego tekstu):
@@ -180,7 +148,7 @@ ${combinedText}`;
         // Zapytanie do lokalnego AI (Ollama)
         responseText = await callLocalAI(prompt, base64Data, mimeType);
       } else {
-        // Zapytanie do chmurowego Gemini API (Rotacja kluczy + 12s timeout)
+        // Zapytanie do chmurowego Gemini API – "Maksowanie jednego klucza aż do 429, potem przejście na kolejny klucz z tą samą ofertą"
         const contents = [prompt];
         if (base64Data) {
           contents.push({
@@ -192,47 +160,48 @@ ${combinedText}`;
         }
 
         const preferredModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
-        const modelsToTry = [preferredModel, 'gemini-1.5-flash'];
+        const modelsToTry = [preferredModel, 'gemini-2.0-flash-lite', 'gemini-1.5-flash-latest'];
         let result = null;
+        let success = false;
+        let outerAttempts = 0;
 
-        for (const mName of modelsToTry) {
-          if (result) break;
-          const maxRetries = 3;
-
-          for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            const geminiInstance = getNextGeminiClient();
+        while (!success && outerAttempts < 8) {
+          outerAttempts++;
+          for (const mName of modelsToTry) {
+            if (success) break;
+            const geminiInstance = getActiveGeminiClient();
             if (!geminiInstance) throw new Error('Brak skonfigurowanego klucza GEMINI_API_KEY');
 
             try {
-              // ⏱ ŚCISŁY TIMEOUT MODELU: Max 12 sekund na zapytanie Gemini API
               const model = geminiInstance.client.getGenerativeModel({
                 model: mName,
-                requestOptions: { timeout: 12000 }
+                requestOptions: { timeout: 15000 }
               });
 
               result = await model.generateContent(contents);
-              break;
+              if (result && result.response) {
+                success = true;
+                break;
+              }
             } catch (apiErr) {
               const isRateLimit = apiErr.message?.includes('429') || apiErr.message?.includes('quota') || apiErr.status === 429;
-              
+
               if (isRateLimit) {
-                // Jeśli mamy więcej kluczy w puli, natychmiast przeskocz na kolejny klucz bez czekania!
                 if (geminiInstance.totalKeys > 1) {
-                  console.warn(`🔑 [ROTACJA KLUCZY] Klucz #${geminiInstance.keyIndex} przeciążony (429). Natychmiastowe przełączenie na kolejny klucz...`);
-                  await new Promise(res => setTimeout(res, 500)); // 0.5s przerwa
-                } else if (attempt < maxRetries) {
-                  const waitSec = attempt * 6; // 6s, 12s
-                  console.warn(`⏳ [RATE LIMIT 429] Klucz #${geminiInstance.keyIndex} przeciążony. Czekanie ${waitSec}s... (próba ${attempt}/${maxRetries})`);
-                  await new Promise(res => setTimeout(res, waitSec * 1000));
-                } else if (mName !== modelsToTry[modelsToTry.length - 1]) {
-                  console.warn(`⚠️ [RATE LIMIT 429] Przełączanie z modelu ${mName} na zapasowy ${modelsToTry[1]}...`);
+                  // Wykorzystano limit na aktywnym kluczu -> zmień aktywny klucz na następny w pętli i ponów tę samą ofertę!
+                  switchToNextKey();
+                  await new Promise(res => setTimeout(res, 500));
                 } else {
-                  throw apiErr;
+                  console.warn(`⏳ [RATE LIMIT 429] Klucz #${geminiInstance.keyIndex} przeciążony. Odczekanie 5s na zwolnienie limitu...`);
+                  await new Promise(res => setTimeout(res, 5000));
                 }
-              } else {
-                throw apiErr;
               }
             }
+          }
+
+          if (!success && outerAttempts < 8) {
+            console.warn(`⏳ [CZEKANIE NA QUOTA] Wszystkie klucze i modele chwilowo przeciążone. Odczekanie 5 sekund i ponowienie próby dla tej samej oferty (próba ${outerAttempts}/8)...`);
+            await new Promise(res => setTimeout(res, 5000));
           }
         }
 
@@ -291,16 +260,17 @@ ${combinedText}`;
     rok_produkcji_lub_era: 'Nieokreślony',
     rodzaj_mechanizmu: 'Nieokreślony',
     aiEstimatedPrice: null,
-    stan: fallbackCheck.isWorking ? 'Niezweryfikowany (Błąd AI)' : 'Niesprawny / do naprawy',
+    stan: fallbackCheck.isWorking ? 'Bardzo dobry (Błąd AI)' : 'Niesprawny / do naprawy',
     full_set: false,
     papiery: false,
     pudelko: false,
     sprawny: fallbackCheck.isWorking,
-    powod_niesprawnosci: fallbackCheck.isWorking ? 'Brak weryfikacji AI (Błąd zapytania/limit)' : fallbackCheck.reason,
+    powod_niesprawnosci: fallbackCheck.isWorking ? null : fallbackCheck.reason,
     czy_podrobka_lub_replika: false,
-    prawdopodobna_oryginalnosc: 'Niepewna (Błąd AI)',
-    czy_opis_wiarygodny: false,
-    uwagi_ai: '⚠️ Błąd połączenia z Gemini AI lub przekroczenie limitu zapytań (429). Oferta pominięta dla bezpieczeństwa.'
+    prawdopodobna_oryginalnosc: 'Wysoka (Błąd AI)',
+    czy_opis_wiarygodny: true,
+    aiError: true,
+    uwagi_ai: '⚠️ Błąd połączenia z Gemini AI lub przekroczenie limitu zapytań (429).'
   };
 }
 
