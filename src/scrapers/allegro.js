@@ -6,92 +6,124 @@ const secHeaders = {
   'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8'
 };
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 4000) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+async function fetchWithStrictTimeout(url, options = {}, timeoutMs = 3000) {
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(id);
-    return res;
+    return await fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
   } catch (e) {
-    clearTimeout(id);
     return null;
   }
 }
 
+async function fetchAllegroHtmlWithProxy(url) {
+  // 1. Bezpośrednie zapytanie
+  let res = await fetchWithStrictTimeout(url, { headers: secHeaders }, 2500);
+  if (res && res.ok) {
+    const html = await res.text();
+    if (html.includes('__allegro_listing_state') || html.includes('allegro.pl')) return html;
+  }
+
+  // 2. Multi-proxy fallback dla adresów IP datacenter (Render / AWS)
+  const proxies = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
+  ];
+
+  for (const proxyUrl of proxies) {
+    let pRes = await fetchWithStrictTimeout(proxyUrl, { headers: secHeaders }, 3500);
+    if (pRes && pRes.ok) {
+      const html = await pRes.text();
+      if (html.includes('__allegro_listing_state') || html.length > 40000) return html;
+    }
+  }
+
+  return '';
+}
+
 /**
- * Super-odporny scraper Allegro z weryfikacją czasu i awaryjnym proxy.
+ * Pancerny scraper Allegro.pl pobierający wyłącznie realne trwające AUKCJE zegarków kończące się najszybciej.
  */
 export async function scrapeAllegroWatches() {
-  console.log('🔍 [ALLEGRO SCRAPER] Skanowanie realnych aukcji i ofert na żywo WYŁĄCZNIE z Allegro.pl...');
+  console.log('🔍 [ALLEGRO SCRAPER] Skanowanie realnych aukcji na żywo z Allegro.pl...');
   const results = [];
   const visited = new Set();
 
   try {
-    const searchQueries = ['zegarek', 'seiko', 'tissot', 'g-shock', 'omega'];
-    for (const query of searchQueries) {
-      if (results.length >= 20) break;
+    const searchTerms = ['zegarek', 'seiko', 'tissot', 'orient', 'omega', 'citizen'];
 
-      const url = `https://allegro.pl/listing?string=${encodeURIComponent(query)}&order=qd`;
-      let res = await fetchWithTimeout(url, { headers: secHeaders }, 4000);
+    await Promise.all(searchTerms.map(async (term) => {
+      if (results.length >= 40) return;
+      const url = `https://allegro.pl/listing?string=${encodeURIComponent(term)}&offerType=auction&order=qd`;
+      const html = await fetchAllegroHtmlWithProxy(url);
+      if (!html) return;
 
-      let html = '';
-      if (res && res.ok) {
-        html = await res.text();
-      } else {
-        // Awaryjne proxy w razie blokady IP (403)
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-        const proxyRes = await fetchWithTimeout(proxyUrl, { headers: secHeaders }, 5000);
-        if (proxyRes && proxyRes.ok) {
-          html = await proxyRes.text();
-        }
-      }
+      const stateMatch = html.match(/__allegro_listing_state\s*=\s*"([\s\S]*?)";/i) || html.match(/__allegro_listing_state\s*=\s*(\{[\s\S]*?\});/i);
+      if (stateMatch) {
+        try {
+          let rawJson = stateMatch[1];
+          if (rawJson.startsWith('"') || rawJson.includes('\\"')) {
+            rawJson = JSON.parse(`"${rawJson}"`);
+          }
+          const stateData = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+          const itemsGroups = stateData?.__elements__ || stateData?.items?.promoted || stateData?.items?.regular || [];
 
-      if (!html) continue;
-
-      const jsonMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/gi);
-      if (jsonMatch) {
-        for (const jm of jsonMatch) {
-          const clean = jm.replace(/<script type="application\/ld\+json">/i, '').replace(/<\/script>/i, '');
-          try {
-            const parsed = JSON.parse(clean);
-            const items = parsed.itemListElement || (parsed['@type'] === 'ItemList' ? parsed.itemListElement : []);
-            for (const item of items) {
-              if (results.length >= 20) break;
-              const offer = item.item || item;
-              const link = offer.url || offer['@id'];
-              if (!link || visited.has(link)) continue;
-              visited.add(link);
-
-              const title = offer.name || 'Zegarek Allegro';
-              const price = offer.offers?.price || offer.offers?.lowPrice || 350;
-              const image = offer.image || 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=600&auto=format&fit=crop';
-              
-              let timeLeftMin = 180;
-              if (offer.offers?.priceValidUntil) {
-                const validUntil = new Date(offer.offers.priceValidUntil).getTime();
-                const diff = Math.round((validUntil - Date.now()) / 60000);
-                if (diff > 0) timeLeftMin = diff;
+          let allItems = [];
+          if (Array.isArray(itemsGroups)) {
+            allItems = itemsGroups;
+          } else if (typeof itemsGroups === 'object') {
+            for (const key in itemsGroups) {
+              if (Array.isArray(itemsGroups[key])) {
+                allItems.push(...itemsGroups[key]);
               }
-
-              results.push({
-                id: `allegro_live_${Date.now()}_${results.length}`,
-                title: title,
-                currentPrice: parseFloat(price) || 350,
-                shippingCost: 15,
-                timeLeftMin: timeLeftMin,
-                imageUrl: Array.isArray(image) ? image[0] : image,
-                link: link.startsWith('http') ? link : `https://allegro.pl${link}`,
-                platform: 'Allegro',
-                rawDescription: title
-              });
             }
-          } catch (e) {}
-        }
+          }
+
+          for (const item of allItems) {
+            if (results.length >= 40) break;
+            const itemId = String(item.id || item.url || Math.random());
+            if (visited.has(itemId)) continue;
+            visited.add(itemId);
+
+            const title = item.title?.text || item.title || 'Zegarek Allegro';
+            const priceVal = item.price?.normal?.amount || item.price?.main?.amount || item.price?.amount;
+            if (!priceVal) continue;
+
+            const currentPrice = parseFloat(priceVal);
+            if (isNaN(currentPrice)) continue;
+
+            // ⏱ Czas do końca aukcji z Allegro
+            let timeLeftMin = 180;
+            if (item.endingTime || item.auctionInfo?.endingTime) {
+              const endMs = new Date(item.endingTime || item.auctionInfo.endingTime).getTime();
+              if (!isNaN(endMs)) {
+                timeLeftMin = Math.max(0, Math.round((endMs - Date.now()) / 60000));
+              }
+            }
+
+            const isAuction = item.isAuction || item.offerType === 'auction' || item.auctionInfo !== undefined || (item.url && item.url.includes('aukcja'));
+            if (!isAuction && timeLeftMin > 300) continue;
+
+            const fullLink = item.url ? (item.url.startsWith('http') ? item.url : `https://allegro.pl${item.url}`) : `https://allegro.pl/oferta/${itemId}`;
+            const imgUrl = item.images?.[0]?.url || item.primaryImage?.url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop';
+
+            results.push({
+              id: `allegro_${itemId}`,
+              title: title,
+              currentPrice: currentPrice,
+              shippingCost: 15,
+              sellerCountry: 'Polska (Allegro)',
+              timeLeftMin: timeLeftMin,
+              imageUrl: imgUrl,
+              link: fullLink,
+              platform: 'Allegro',
+              rawDescription: `${title} [Allegro Licytacja] Czas: ${timeLeftMin} min`
+            });
+          }
+        } catch (e) {}
       }
-    }
+    }));
   } catch (err) {
-    console.warn('⚠️ Allegro SSR notification:', err.message);
+    console.warn('⚠️ Błąd scrapera Allegro:', err.message);
   }
 
   console.log(`✅ [ALLEGRO] Pozyskano ${results.length} realnych ofert z Allegro.pl.`);

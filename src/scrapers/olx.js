@@ -6,21 +6,16 @@ const secHeaders = {
   'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8'
 };
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 4000) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+async function fetchWithStrictTimeout(url, options = {}, timeoutMs = 3000) {
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(id);
-    return res;
+    return await fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
   } catch (e) {
-    clearTimeout(id);
     return null;
   }
 }
 
 /**
- * Super-odporny scraper OLX.pl wyciągający realne oferty z cenami i lokalizacją sprzedawcy.
+ * Super-szybki, odporny na zawieszanie scraper OLX.pl z wyciąganiem lokalizacji i realnych cen.
  */
 export async function scrapeOlxWatches() {
   console.log('🔍 [OLX SCRAPER] Skanowanie realnych ofert na żywo z OLX.pl...');
@@ -29,24 +24,25 @@ export async function scrapeOlxWatches() {
 
   try {
     const searchQueries = ['zegarek', 'seiko', 'tissot', 'orient', 'casio', 'omega'];
-    for (const query of searchQueries) {
-      if (results.length >= 25) break;
+
+    await Promise.all(searchQueries.map(async (query) => {
+      if (results.length >= 40) return;
 
       const url = `https://www.olx.pl/oferty/q-${encodeURIComponent(query)}/`;
-      let res = await fetchWithTimeout(url, { headers: secHeaders }, 4000);
+      let res = await fetchWithStrictTimeout(url, { headers: secHeaders }, 3000);
 
       let html = '';
       if (res && res.ok) {
         html = await res.text();
       } else {
         const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-        const proxyRes = await fetchWithTimeout(proxyUrl, { headers: secHeaders }, 5000);
+        const proxyRes = await fetchWithStrictTimeout(proxyUrl, { headers: secHeaders }, 3500);
         if (proxyRes && proxyRes.ok) {
           html = await proxyRes.text();
         }
       }
 
-      if (!html) continue;
+      if (!html) return;
 
       const stateMatch = html.match(/window\.__PRERENDERED_STATE__\s*=\s*"([\s\S]*?)";/i);
       if (stateMatch) {
@@ -56,7 +52,7 @@ export async function scrapeOlxWatches() {
           const ads = data.listing?.listing?.ads || [];
 
           for (const ad of ads) {
-            if (results.length >= 25) break;
+            if (results.length >= 40) break;
             const id = String(ad.id);
             if (visited.has(id)) continue;
             visited.add(id);
@@ -70,12 +66,12 @@ export async function scrapeOlxWatches() {
             const photo = ad.photos?.[0]?.link ? ad.photos[0].link.replace('{width}', '1000').replace('{height}', '750') : 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=600&auto=format&fit=crop';
 
             results.push({
-              id: `olx_live_${id}`,
+              id: `olx_${id}`,
               title: title,
               currentPrice: parseFloat(priceVal),
-              shippingCost: 12, // Przesyłka OLX (Praczek/InPost)
+              shippingCost: 12, // Przesyłka OLX
               sellerCountry: `Polska, ${city} (OLX)`,
-              timeLeftMin: 120, // Oferty kup teraz / licytacje na OLX
+              timeLeftMin: 120, // Oferty kup teraz na OLX
               imageUrl: photo,
               link: link,
               platform: 'OLX',
@@ -84,7 +80,7 @@ export async function scrapeOlxWatches() {
           }
         } catch (err) {}
       }
-    }
+    }));
   } catch (err) {
     console.warn('⚠️ Błąd scrapera OLX:', err.message);
   }
