@@ -3,16 +3,25 @@ dotenv.config();
 
 /**
  * Zapytanie do potężnego, darmowego silnika Groq AI (groq.com)
- * Model: llama-3.3-70b-versatile (70 miliardów parametrów, 200ms reakcja, 14,400 zapytań/dzień ZA DARMO!)
+ * Używa ultraszybkiej rotacji modeli (llama-3.1-8b-instant, llama-3.3-70b-versatile, mixtral-8x7b-32768, gemma2-9b-it)
+ * Jeśli jeden model osiągnie limit, NATYCHMIAST przełącza się na kolejny wolny model w 0 milisekund (BEZ CZEKANIA 60s!).
  */
 async function callGroqAI(prompt) {
   const groqKey = process.env.GROQ_API_KEY;
   if (!groqKey) return null;
 
-  const modelName = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+  // Przycięcie promptu do 2000 znaków (zabezpieczenie limitu tokenów TPM)
+  const cleanPrompt = prompt.length > 2000 ? prompt.slice(0, 2000) + '...' : prompt;
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    console.log(`🚀 [GROQ AI] Zapytanie do ultraszybkiego silnika Groq (${modelName})...`);
+  const models = [
+    process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
+    'llama-3.3-70b-versatile',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it'
+  ];
+
+  for (const modelName of models) {
+    console.log(`🚀 [GROQ AI] Zapytanie do silnika Groq (${modelName})...`);
 
     try {
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -23,10 +32,10 @@ async function callGroqAI(prompt) {
         },
         body: JSON.stringify({
           model: modelName,
-          messages: [{ role: 'user', content: prompt }],
+          messages: [{ role: 'user', content: cleanPrompt }],
           temperature: 0.1
         }),
-        signal: AbortSignal.timeout(15000)
+        signal: AbortSignal.timeout(10000)
       });
 
       if (res.ok) {
@@ -36,16 +45,15 @@ async function callGroqAI(prompt) {
       }
 
       const errTxt = await res.text();
-      // Jeśli błąd to 429 (Rate Limit na minutę), odczekaj 60s i ponów
+      // Jeśli błąd to 429 (Rate Limit), NATYCHMIAST przełącz na kolejny wolny model w tablicy (0s czekania!)
       if (res.status === 429 || errTxt.includes('429') || errTxt.includes('rate_limit') || errTxt.includes('Rate limit')) {
-        console.warn(`⚡ [GROQ RATE LIMIT] Wykryto limit minutowy (429). Odczekuję 60 sekund na reset puli...`);
-        await new Promise(r => setTimeout(r, 60000));
+        console.warn(`⚡ [GROQ ROTATION] Model ${modelName} osiągnął limit (429). Natychmiastowe przełączenie na kolejny model...`);
         continue;
       }
 
-      console.warn(`⚠️ [GROQ AI] Błąd ${res.status}: ${errTxt.slice(0, 150)}`);
+      console.warn(`⚠️ [GROQ AI] Model ${modelName} Błąd ${res.status}: ${errTxt.slice(0, 150)}`);
     } catch (e) {
-      console.warn('⚠️ Błąd połączenia z Groq AI:', e.message);
+      console.warn(`⚠️ Błąd połączenia z Groq AI (${modelName}):`, e.message);
     }
   }
 
@@ -53,7 +61,7 @@ async function callGroqAI(prompt) {
 }
 
 /**
- * Zapasowe zapytanie do OpenRouter API (gdyby Groq nie odpowiedział)
+ * Zapasowe zapytanie do OpenRouter API (gdyby żaden model Groq nie odpowiedział)
  */
 async function callOpenRouterAI(prompt) {
   const openRouterKey = process.env.OPENROUTER_API_KEY;
@@ -67,7 +75,9 @@ async function callOpenRouterAI(prompt) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openRouterKey}`
+        'Authorization': `Bearer ${openRouterKey}`,
+        'HTTP-Referer': 'https://zegarki-bot.onrender.com',
+        'X-Title': 'Watch FLIP Bot'
       },
       body: JSON.stringify({
         model: modelName,
@@ -79,89 +89,64 @@ async function callOpenRouterAI(prompt) {
 
     if (res.ok) {
       const data = await res.json();
-      return data.choices?.[0]?.message?.content || '';
+      const text = data.choices?.[0]?.message?.content || '';
+      if (text.length > 5) return text;
+    } else {
+      const errTxt = await res.text();
+      console.warn(`⚠️ [OPENROUTER AI] Błąd ${res.status}: ${errTxt.slice(0, 150)}`);
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('⚠️ Błąd połączenia z OpenRouter AI:', e.message);
+  }
 
   return null;
 }
 
 /**
- * Ścisły pre-check tekstu przed zapytaniem AI.
+ * Zwraca ujednoliconą analizę AI dla podanej oferty zegarka.
  */
-export function checkTextIsWorkingStatus(text) {
-  if (!text) return { isDefinitelyNotWorking: false };
-  const lower = text.toLowerCase();
-  const nonWorkingPhrases = [
-    'nie działa', 'nie na chodzie', 'niesprawny', 'niesprawna', 'uszkodzony',
-    'uszkodzone', 'do naprawy', 'do serwisu', 'wymaga serwisu', 'wymaga naprawy',
-    'balans uszkodzony', 'staje', 'spóźnia', 'spoznia', 'do renowacji', 'na części',
-    'na czesci', 'do przeglądu', 'do przegladu', 'nietestowany', 'stan nieznany'
-  ];
+export async function analyzeWatchOffer(rawOffer) {
+  const title = rawOffer.title || 'Brak tytułu';
+  const description = rawOffer.rawDescription || rawOffer.descriptionText || '';
+  const price = rawOffer.currentPrice || 0;
 
-  for (const phrase of nonWorkingPhrases) {
-    if (lower.includes(phrase)) {
-      return { isDefinitelyNotWorking: true, reason: phrase };
-    }
-  }
+  const prompt = `Jesteś ekspertem rzeczoznawcą i fliperem luksusowych i popularnych zegarków.
+Przeanalizuj poniższe ogłoszenie i opisz stan oraz parametry w formacie czystego JSON.
 
-  return { isDefinitelyNotWorking: false };
-}
+Tytuł ogłoszenia: "${title}"
+Cena: ${price} PLN
+Opis ogłoszenia:
+"${description.slice(0, 1500)}"
 
-/**
- * Główna funkcja analityczna zasilana przez ultraszybki silnik Groq AI (Llama 3.3 70B Versatile).
- */
-export async function analyzeWatchOffer(title, description, imageUrl = null, extraInfo = {}) {
-  const countryText = extraInfo.sellerCountry ? `\nKraj wysyłki sprzedawcy ze strony: ${extraInfo.sellerCountry}` : '';
-  const shippingText = extraInfo.shippingCost ? `\nRealny koszt dostawy ze strony: ${extraInfo.shippingCost} PLN` : '';
-  const combinedText = `Tytuł: ${title}\nOpis: ${description || ''}${countryText}${shippingText}`;
-
-  const prompt = `Jesteś profesjonalnym rzeczoznawcą i fliperem zegarków w Polsce (budżet 100 PLN - 3000 PLN). Twoim zadaniem jest PRECYZYJNA IDENTYFIKACJA MODELU, WERYFIKACJA SPRAWNOŚCI MECHANICZNEJ, OCENA AUTENTYCZNOŚCI I STANU KOMPLETACJI zegarka. NIE WYCENIASZ CENY.
-
-🚨 KRYTYCZNA ZASADA #1 - WERYFIKACJA SPRAWNOŚCI MECHANICZNEJ:
-JEŚLI W OPISIE TEKSTOWYM LUB TYTULE podano jakikolwiek detal o braku sprawności lub uszkodzeniu (np. "niesprawny", "do naprawy", "wymaga serwisu", "nie działa", "nie na chodzie", "staje", "spóźnia", "balans uszkodzony", "do renowacji", "na części", "nietestowany", "stan nieznany"), MUSISZ USTAWIC "sprawny": false! W polu "powod_niesprawnosci" podaj dokładny powód.
-
-🛡 KRYTYCZNA ZASADA #2 - WERYFIKACJA AUTENTYCZNOŚCI:
-Jeśli oferta sprzedaje replikę, klona, podróbkę (np. "Rolex", "Omega", "Breitling" za rażąco niską cenę lub opis z wyraźną sugestią "replika", "tarcza zamiennik", "homage mod"), MUSISZ USTAWIC "czy_podrobka_lub_replika": true, "prawdopodobna_oryginalnosc": "Podróbka / Replika" oraz "czy_opis_wiarygodny": false!
-
-📦 KRYTYCZNA ZASADA #3 - WERYFIKACJA ZESTAWU (PUDEŁKO I DOKUMENTY):
-Jeśli w opisie sprzedawca pisze że sprzedaje z pudełkiem i papierami/dokumentami, ustaw "full_set": true, "pudelko": true, "papiery": true. Jeśli brak, ustaw false.
-
-ZWRÓĆ WYŁĄCZNIE CZYSTY POPRAWNY JSON BEZ ŻADNEGO MARKDOWNU LUB TEKSTU POBOCZNEGO (DOKŁADNIE TEN FORMAT):
+Zwróć WYŁĄCZNIE poprawny kod JSON zgodny z poniższym schematem, bez żadnego dodatkowego tekstu ani formatowania markdown:
 {
-  "marka": "Seiko",
-  "model": "Presage",
-  "nr_referencyjny": "SRPD37J1",
-  "rok_produkcji_lub_era": "ok. 2020",
-  "rodzaj_mechanizmu": "Automatyczny",
-  "aiEstimatedPrice": null,
-  "stan": "Bardzo dobry",
-  "full_set": true,
-  "papiery": true,
-  "pudelko": true,
-  "sprawny": true,
-  "powod_niesprawnosci": null,
-  "czy_podrobka_lub_replika": false,
-  "prawdopodobna_oryginalnosc": "Wysoka",
-  "czy_opis_wiarygodny": true,
-  "uwagi_ai": "Seiko Presage SRPD37J1 z oryginalnym pudełkiem i papierami."
-}
+  "marka": "Dokładna nazwa marki np. Seiko, Tissot, Casio, Omega",
+  "model": "Dokładny model zegarka",
+  "nr_referencyjny": "Numer referencyjny np. SRPD55K1, T063.610.16.037.00 lub null jeśli brak",
+  "rok_produkcji_lub_era": "np. 2020+, lata 90., vintage lub nieznany",
+  "rodzaj_mechanizmu": "Automatyczny / Kwarcowy / Manualny / Solar / Eco-Drive / nieznany",
+  "stan": "Nowy / Bardzo dobry / Doby / Do renowacji / Uszkodzony",
+  "full_set": true/false (czy jest komplet pudełko + papiery),
+  "papiery": true/false,
+  "pudelko": true/false,
+  "sprawny": true/false (czy zegarek jest w 100% sprawny chodu i funkcji),
+  "powod_niesprawnosci": "powód niesprawności lub null",
+  "czy_podrobka_lub_replika": true/false (czy z opisu wynika że to podróbka/replika/homage),
+  "prawdopodobna_oryginalnosc": "Wysoka / Średnia / Niska / Podróbka",
+  "czy_opis_wiarygodny": true/false,
+  "uwagi_ai": "Krótkie podsumowanie stanu i kompletności w 1 zdaniu"
+}`;
 
-Dane aukcji:
-${combinedText}`;
+  let rawResponse = await callGroqAI(prompt);
 
-  // 1. Zawsze wykonaj ultraszybkie zapytanie do Groq AI (Llama 3.3 70B - 200ms reakcja, 14 400 requests/day free)
-  let responseText = await callGroqAI(prompt);
-
-  // 2. Jeśli Groq z jakiegoś powodu nie odpowiedział -> użyj OpenRouter jako zapasowego silnika
-  if (!responseText) {
-    responseText = await callOpenRouterAI(prompt);
+  if (!rawResponse) {
+    rawResponse = await callOpenRouterAI(prompt);
   }
 
-  if (!responseText) {
-    console.error('⚠️ Silnik AI nie wygenerował odpowiedzi.');
+  if (!rawResponse) {
+    console.warn('⚠️ Silnik AI nie wygenerował odpowiedzi.');
     return {
-      marka: title.split(' ')[0] || 'Nieznana',
+      marka: title.split(' ')[0] || 'Zegarek',
       model: title,
       nr_referencyjny: null,
       rok_produkcji_lub_era: 'Nieokreślony',
@@ -181,35 +166,37 @@ ${combinedText}`;
     };
   }
 
-  let cleanJsonStr = responseText.replace(/```json\s*|\s*```/g, '').trim();
-  let parsed = {};
   try {
-    parsed = JSON.parse(cleanJsonStr);
+    const cleanJsonText = rawResponse.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(cleanJsonText);
+    return parsed;
   } catch (parseErr) {
-    const jsonBlockMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
-    if (jsonBlockMatch) {
+    console.warn('⚠️ Błąd parsowania JSON z odpowiedzi AI:', parseErr.message);
+    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
       try {
-        parsed = JSON.parse(jsonBlockMatch[0]);
+        return JSON.parse(jsonMatch[0]);
       } catch (e2) {}
     }
-  }
 
-  return {
-    marka: parsed.marka || title.split(' ')[0] || 'Nieznana',
-    model: parsed.model || title,
-    nr_referencyjny: parsed.nr_referencyjny || null,
-    rok_produkcji_lub_era: parsed.rok_produkcji_lub_era || 'Nieokreślony',
-    rodzaj_mechanizmu: parsed.rodzaj_mechanizmu || 'Nieokreślony',
-    aiEstimatedPrice: null,
-    stan: parsed.stan || 'Używany',
-    full_set: Boolean(parsed.full_set),
-    papiery: Boolean(parsed.papiery),
-    pudelko: Boolean(parsed.pudelko),
-    sprawny: parsed.sprawny !== undefined ? Boolean(parsed.sprawny) : true,
-    powod_niesprawnosci: parsed.powod_niesprawnosci || null,
-    czy_podrobka_lub_replika: Boolean(parsed.czy_podrobka_lub_replika),
-    prawdopodobna_oryginalnosc: parsed.prawdopodobna_oryginalnosc || 'Nieokreślona',
-    czy_opis_wiarygodny: parsed.czy_opis_wiarygodny !== undefined ? Boolean(parsed.czy_opis_wiarygodny) : true,
-    uwagi_ai: parsed.uwagi_ai || 'Brak uwag AI.'
-  };
+    return {
+      marka: title.split(' ')[0] || 'Zegarek',
+      model: title,
+      nr_referencyjny: null,
+      rok_produkcji_lub_era: 'Nieokreślony',
+      rodzaj_mechanizmu: 'Nieokreślony',
+      aiEstimatedPrice: null,
+      stan: 'Bardzo dobry',
+      full_set: false,
+      papiery: false,
+      pudelko: false,
+      sprawny: true,
+      powod_niesprawnosci: null,
+      czy_podrobka_lub_replika: false,
+      prawdopodobna_oryginalnosc: 'Wysoka',
+      czy_opis_wiarygodny: true,
+      aiError: true,
+      uwagi_ai: '⚠️ Błąd formatu odpowiedzi AI.'
+    };
+  }
 }

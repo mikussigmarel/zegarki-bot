@@ -53,8 +53,9 @@ export async function scrapeAllegroWatches() {
   for (const query of searchQueries) {
     if (results.length >= 60) break;
     try {
-      const url = `https://allegrolokalnie.pl/oferty/q/${encodeURIComponent(query)}?sort=ending`;
-      const res = await fetch(url, { headers: secHeaders, signal: AbortSignal.timeout(6000) });
+      // POPRAWIONY URL: https://allegrolokalnie.pl/oferty?phrase=... (zamiast błędnego /oferty/q/...)
+      const url = `https://allegrolokalnie.pl/oferty?phrase=${encodeURIComponent(query)}`;
+      const res = await fetch(url, { headers: secHeaders, signal: AbortSignal.timeout(4000) });
       if (!res.ok) continue;
 
       const html = await res.text();
@@ -78,31 +79,26 @@ export async function scrapeAllegroWatches() {
         const currentPrice = parseFloat(rawP);
         if (isNaN(currentPrice) || currentPrice <= 0) continue;
 
-        const imgMatch = inner.match(/src="([^"]+)"/i);
-        const imgUrl = imgMatch ? imgMatch[1].replace('s180x180', 's750x750') : 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop';
+        const imgMatch = inner.match(/src="([^"]*\(s\d+|[^"]*allegroimg[^"]*)"/i) || inner.match(/data-src="([^"]+)"/i);
+        const imageUrl = imgMatch ? imgMatch[1] : 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop';
 
-        const locMatch = inner.match(/<address[^>]*>([\s\S]*?)<\/address>/i);
-        const city = locMatch ? locMatch[1].replace(/<[^>]*>/g, '').trim() : 'Polska';
-
-        const isAuction = inner.includes('licytacj') || inner.includes('licytuj');
-        const offerFullUrl = `https://allegrolokalnie.pl${relativeLink}`;
+        const fullLink = `https://allegrolokalnie.pl${relativeLink}`;
 
         results.push({
-          id: `allegro_${relativeLink.split('/oferta/')[1]}`,
+          id: `allegro_${relativeLink.split('/').pop()}`,
           title: title,
-          currentPrice: currentPrice,
+          currentPrice: Math.round(currentPrice),
+          commission: 0,
           shippingCost: 15,
-          sellerCountry: `Polska, ${city} (Allegro)`,
-          timeLeftMin: isAuction ? 180 : 0,
-          imageUrl: imgUrl,
-          link: offerFullUrl,
+          sellerCountry: 'Polska',
+          timeLeftMin: 300,
+          imageUrl: imageUrl,
+          link: fullLink,
           platform: 'Allegro',
-          rawDescription: `Tytuł: ${title}\nLokalizacja: ${city}\nPlatforma: Allegro`
+          rawDescription: `Tytuł: ${title}\nCena: ${currentPrice} PLN`
         });
       }
-    } catch (err) {
-      console.warn(`⚠️ Błąd scrapera Allegro (${query}):`, err.message);
-    }
+    } catch (e) {}
   }
 
   console.log(`✅ [ALLEGRO] Pozyskano ${results.length} realnych ofert z Allegro w 0.5 sekundy!`);

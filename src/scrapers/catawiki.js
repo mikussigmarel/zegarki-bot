@@ -21,19 +21,36 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 3000) {
 }
 
 /**
+ * Wyciąga HTML strony Catawiki z wielopoziomowym proxy w razie blokady IP chmury
+ */
+async function fetchCatawikiPageHtml(url) {
+  const proxies = [
+    url,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`
+  ];
+
+  for (const targetUrl of proxies) {
+    try {
+      const res = await fetchWithTimeout(targetUrl, { headers: secHeaders }, 3500);
+      if (res && res.ok) {
+        const html = await res.text();
+        if (html && (html.includes('__NEXT_DATA__') || html.includes('catawiki'))) {
+          return html;
+        }
+      }
+    } catch (e) {}
+  }
+  return '';
+}
+
+/**
  * Wyciąga REALNE dane ze strony oferty: cena aktualnego bida (EUR), czas zakończenia, kraj sprzedawcy oraz dokładną cenę dostawy.
  */
 async function getRealLotDetails(lotUrl, fallbackBuyNow = null) {
   try {
-    let res = await fetchWithTimeout(lotUrl, { headers: secHeaders }, 2500);
-    if (!res || !res.ok) {
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(lotUrl)}`;
-      res = await fetchWithTimeout(proxyUrl, { headers: secHeaders }, 2500);
-    }
-    if (!res || !res.ok) {
-      const proxyUrl2 = `https://corsproxy.io/?${encodeURIComponent(lotUrl)}`;
-      res = await fetchWithTimeout(proxyUrl2, { headers: secHeaders }, 2500);
-    }
+    const html = await fetchCatawikiPageHtml(lotUrl);
 
     let timeLeftMin = null;
     let sellerCountry = 'Unia Europejska';
@@ -41,8 +58,7 @@ async function getRealLotDetails(lotUrl, fallbackBuyNow = null) {
     let descriptionText = '';
     let currentPriceEUR = fallbackBuyNow;
 
-    if (res && res.ok) {
-      const html = await res.text();
+    if (html) {
       const jsonMatch = html.match(/<script\s+id="__NEXT_DATA__"\s+type="application\/json"\s*>([\s\S]*?)<\/script>/i);
       if (jsonMatch) {
         const data = JSON.parse(jsonMatch[1]);
@@ -107,9 +123,8 @@ async function getRealLotDetails(lotUrl, fallbackBuyNow = null) {
       }
     }
 
-    // Bezpieczny fallbackcenowy gdyby połączenie ze stroną pojedynczej aukcji zostało zablokowane
     if (!currentPriceEUR || isNaN(currentPriceEUR) || currentPriceEUR <= 0) {
-      currentPriceEUR = 25; // Domyślna cena startowa bida (25 EUR)
+      currentPriceEUR = 25;
     }
 
     return { currentPriceEUR, timeLeftMin, sellerCountry, shippingCostPLN, descriptionText };
@@ -133,19 +148,7 @@ export async function scrapeCatawikiWatches() {
     if (results.length >= 60) break;
     try {
       const url = `https://www.catawiki.com/en/s?q=${encodeURIComponent(term)}&sort=closing_soon`;
-      let res = await fetchWithTimeout(url, { headers: secHeaders }, 3500);
-
-      let html = '';
-      if (res && res.ok) {
-        html = await res.text();
-      } else {
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-        const proxyRes = await fetchWithTimeout(proxyUrl, { headers: secHeaders }, 3500);
-        if (proxyRes && proxyRes.ok) {
-          html = await proxyRes.text();
-        }
-      }
-
+      const html = await fetchCatawikiPageHtml(url);
       if (!html) continue;
 
       const jsonMatch = html.match(/<script\s+id="__NEXT_DATA__"\s+type="application\/json"\s*>([\s\S]*?)<\/script>/i);
@@ -164,7 +167,6 @@ export async function scrapeCatawikiWatches() {
         const title = lot.title || 'Zegarek Catawiki';
         const lowerTitle = title.toLowerCase();
 
-        // 🛡 FILTRACJA NIE-ZEGARKÓW (Dywany, meble, monety, obrazy itp.)
         if (lowerTitle.includes('rug') || lowerTitle.includes('carpet') || lowerTitle.includes('dywan') || lowerTitle.includes('coin') || lowerTitle.includes('moneta') || lowerTitle.includes('painting') || lowerTitle.includes('shaggy') || lowerTitle.includes('lahore')) {
           return null;
         }
