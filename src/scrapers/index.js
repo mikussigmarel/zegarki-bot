@@ -1,5 +1,5 @@
 import { scrapeCatawikiWatches } from './catawiki.js';
-import { scrapeAllegroWatches } from './allegro.js';
+import { scrapeAllegroWatches, fetchAllegroFullDescription } from './allegro.js';
 import { scrapeOlxWatches } from './olx.js';
 import { analyzeWatchOffer, checkTextIsWorkingStatus } from '../services/geminiAI.js';
 import { getMarketPriceEstimate, evaluateBuyingDecision } from './priceEvaluator.js';
@@ -72,6 +72,14 @@ export async function runScraperJob(forceAll = false) {
 
         // Odstęp czasu (4.5s), aby bezwzględnie przestrzegać darmowego limitu 15 RPM w Gemini API
         await new Promise(r => setTimeout(r, 4500));
+
+        // Dociągnięcie pełnego opisu sprzedawcy z Allegro na żądanie dla wyselekcjonowanego kandydata
+        if (rawOffer.platform === 'Allegro' && rawOffer.link) {
+          const fullAllegroDesc = await fetchAllegroFullDescription(rawOffer.link);
+          if (fullAllegroDesc && fullAllegroDesc.length >= 10) {
+            rawOffer.rawDescription = `Opis sprzedawcy:\n${fullAllegroDesc}`;
+          }
+        }
 
         // 4. Analiza AI kombinacji stanu, rocznika, mechanizmu, wyposażenia oraz wyciągniętej ze strony dostawy
         const aiData = await analyzeWatchOffer(rawOffer.title, rawOffer.rawDescription, rawOffer.imageUrl, {

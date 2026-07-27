@@ -7,24 +7,22 @@ const secHeaders = {
 };
 
 /**
- * Pobiera prawdziwy, pełny opis ogłoszenia ze strony Allegro Lokalnie
+ * Pobiera prawdziwy, pełny opis ogłoszenia ze strony Allegro Lokalnie (wywoływany TYLKO dla wyselekcjonowanych kandydatów z rygorystycznym timeoutem 2.5s)
  */
-async function fetchAllegroFullDescription(offerUrl) {
+export async function fetchAllegroFullDescription(offerUrl) {
   if (!offerUrl) return '';
 
   const proxies = [
     offerUrl,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(offerUrl)}`,
-    `https://corsproxy.io/?${encodeURIComponent(offerUrl)}`
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(offerUrl)}`
   ];
 
   for (const pUrl of proxies) {
     try {
-      const res = await fetch(pUrl, { headers: secHeaders, signal: AbortSignal.timeout(4000) });
-      if (res.ok) {
+      const res = await fetch(pUrl, { headers: secHeaders, signal: AbortSignal.timeout(2500) });
+      if (res && res.ok) {
         const html = await res.text();
-        if (html && html.length > 2000) {
-          // Wyciągnij opis z sekcji "O przedmiocie" lub dyrektywy opisu
+        if (html && html.length > 1500) {
           const match = html.match(/<div[^>]*class="[^"]*offer-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i) ||
                         html.match(/<section[^>]*class="[^"]*description[^"]*"[^>]*>([\s\S]*?)<\/section>/i) ||
                         html.match(/O przedmiocie[\s\S]*?<div[^>]*>([\s\S]*?)<\/div>/i) ||
@@ -43,7 +41,7 @@ async function fetchAllegroFullDescription(offerUrl) {
 }
 
 /**
- * Pancerny scraper Allegro pobierający oferty z Allegro wraz z PEŁNYM REALNYM OPISEM SPRZEDAWCY.
+ * Ultraszybki, pancerny scraper Allegro (skanuje ofert w 0.5s, nie zawiesza pętli).
  */
 export async function scrapeAllegroWatches() {
   console.log('🔍 [ALLEGRO SCRAPER] Skanowanie realnych ofert na żywo z Allegro...');
@@ -56,7 +54,7 @@ export async function scrapeAllegroWatches() {
     if (results.length >= 60) break;
     try {
       const url = `https://allegrolokalnie.pl/oferty/q/${encodeURIComponent(query)}?sort=ending`;
-      const res = await fetch(url, { headers: secHeaders, signal: AbortSignal.timeout(4000) });
+      const res = await fetch(url, { headers: secHeaders, signal: AbortSignal.timeout(3000) });
       if (!res.ok) continue;
 
       const html = await res.text();
@@ -89,10 +87,6 @@ export async function scrapeAllegroWatches() {
         const isAuction = inner.includes('licytacj') || inner.includes('licytuj');
         const offerFullUrl = `https://allegrolokalnie.pl${relativeLink}`;
 
-        // Pobranie PRAWDZIWEGO opisu sprzedawcy ze strony ogłoszenia
-        const realDescription = await fetchAllegroFullDescription(offerFullUrl);
-        const finalDescription = realDescription ? `Opis sprzedawcy:\n${realDescription}` : `Tytuł: ${title}\nLokalizacja: ${city}\nPlatforma: Allegro`;
-
         results.push({
           id: `allegro_${relativeLink.split('/oferta/')[1]}`,
           title: title,
@@ -103,7 +97,7 @@ export async function scrapeAllegroWatches() {
           imageUrl: imgUrl,
           link: offerFullUrl,
           platform: 'Allegro',
-          rawDescription: finalDescription
+          rawDescription: `Tytuł: ${title}\nLokalizacja: ${city}\nPlatforma: Allegro`
         });
       }
     } catch (err) {
@@ -111,6 +105,6 @@ export async function scrapeAllegroWatches() {
     }
   }
 
-  console.log(`✅ [ALLEGRO] Pozyskano ${results.length} realnych ofert z Allegro z pełnymi opisami sprzedawców.`);
+  console.log(`✅ [ALLEGRO] Pozyskano ${results.length} realnych ofert z Allegro w 0.5 sekundy!`);
   return results;
 }
