@@ -1,0 +1,26 @@
+{
+  "name": "watch-resell-bot",
+  "version": "1.0.0",
+  "description": "Bot do monitorowania, analizy AI (Gemini) i zakupu zegarków z aukcji Catawiki/Allegro z powiadomieniami na Telegramie i dashboardem.",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:db-push": "prisma db push"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@prisma/client": "^5.22.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "node-cron": "^3.0.3",
+    "node-telegram-bot-api": "^0.66.0",
+    "playwright": "^1.48.2"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
+  }
+}

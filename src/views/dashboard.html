@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WatchResell Pro - Panel Zarządzania Magazynem Zegarków</title>
+  <meta name="description" content="Nowoczesny dashboard do automatycznego monitorowania, wyceny i zarządzenia stanem magazynowym zegarków luksusowych i vintage.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0a0c10;
+      --bg-card: rgba(22, 27, 34, 0.7);
+      --bg-card-border: rgba(255, 255, 255, 0.08);
+      --accent-gold: #e5b869;
+      --accent-gold-glow: rgba(229, 184, 105, 0.25);
+      --accent-emerald: #10b981;
+      --accent-blue: #3b82f6;
+      --accent-purple: #8b5cf6;
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --status-drodze: #f59e0b;
+      --status-stanie: #3b82f6;
+      --status-sprzedany: #10b981;
+      --radius-lg: 16px;
+      --radius-md: 10px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-primary);
+      background-image: 
+        radial-gradient(at 15% 15%, rgba(59, 130, 246, 0.08) 0px, transparent 50%),
+        radial-gradient(at 85% 85%, rgba(229, 184, 105, 0.06) 0px, transparent 50%);
+      color: var(--text-main);
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    header {
+      max-width: 1300px;
+      margin: 0 auto 32px auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--bg-card-border);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-icon {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, var(--accent-gold), #b8860b);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      box-shadow: 0 0 20px var(--accent-gold-glow);
+    }
+
+    .brand-title {
+      font-size: 24px;
+      font-weight: 700;
+      background: linear-gradient(90deg, #ffffff, var(--accent-gold));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .btn {
+      padding: 10px 18px;
+      border-radius: var(--radius-md);
+      font-weight: 500;
+      font-size: 14px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-gold), #c59740);
+      color: #000;
+      box-shadow: 0 4px 15px var(--accent-gold-glow);
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+      border-color: var(--bg-card-border);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    /* Grid statystyk */
+    .stats-container {
+      max-width: 1300px;
+      margin: 0 auto 32px auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 20px;
+    }
+
+    .stat-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--bg-card-border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s ease;
+    }
+
+    .stat-card:hover {
+      transform: translateY(-2px);
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+      background: var(--card-accent, var(--accent-gold));
+    }
+
+    .stat-label {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .stat-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Main Container */
+    main {
+      max-width: 1300px;
+      margin: 0 auto;
+    }
+
+    .panel-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--bg-card-border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+    }
+
+    .controls-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .filter-group {
+      display: flex;
+      gap: 8px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 4px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--bg-card-border);
+    }
+
+    .filter-btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .filter-btn.active {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-main);
+    }
+
+    .table-responsive {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th {
+      padding: 14px 16px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--bg-card-border);
+    }
+
+    td {
+      padding: 16px;
+      font-size: 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      vertical-align: middle;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .watch-thumb {
+      width: 50px;
+      height: 50px;
+      border-radius: 8px;
+      object-fit: cover;
+      border: 1px solid var(--bg-card-border);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .badge {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: inline-block;
+    }
+
+    .badge-drodze { background: rgba(245, 158, 11, 0.15); color: var(--status-drodze); border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-stanie { background: rgba(59, 130, 246, 0.15); color: var(--status-stanie); border: 1px solid rgba(59, 130, 246, 0.3); }
+    .badge-sprzedany { background: rgba(16, 185, 129, 0.15); color: var(--status-sprzedany); border: 1px solid rgba(16, 185, 129, 0.3); }
+
+    .price-tag {
+      font-weight: 600;
+    }
+
+    .profit-positive {
+      color: var(--accent-emerald);
+      font-weight: 600;
+    }
+
+    .actions-cell {
+      display: flex;
+      gap: 8px;
+    }
+
+    /* Modal Styling */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal-box {
+      background: #12161f;
+      border: 1px solid var(--bg-card-border);
+      border-radius: var(--radius-lg);
+      width: 100%;
+      max-width: 500px;
+      padding: 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .form-control {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--bg-card-border);
+      color: var(--text-main);
+      font-size: 14px;
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: var(--accent-gold);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⌚</div>
+      <div>
+        <div class="brand-title">WatchResell Pro</div>
+        <div style="font-size: 12px; color: var(--text-muted);">System Alertyzacji & Magazyn Zegarków</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-scan" class="btn btn-secondary" onclick="triggerScan()">
+        ⚡ Skanuj Aukcje Teraz
+      </button>
+      <button class="btn btn-primary" onclick="openAddModal()">
+        + Dodaj Zegarek
+      </button>
+    </div>
+  </header>
+
+  <!-- KAFELKI STATYSTYK -->
+  <div class="stats-container">
+    <div class="stat-card" style="--card-accent: var(--accent-gold);">
+      <div class="stat-label">Zamrożony Kapitał</div>
+      <div class="stat-value" id="stat-kapital">0.00 PLN</div>
+      <div class="stat-sub">W drodze + na stanie</div>
+    </div>
+
+    <div class="stat-card" style="--card-accent: var(--status-drodze);">
+      <div class="stat-label">W Drodze</div>
+      <div class="stat-value" id="stat-drodze">0</div>
+      <div class="stat-sub">Oczekuje na dostawę</div>
+    </div>
+
+    <div class="stat-card" style="--card-accent: var(--status-stanie);">
+      <div class="stat-label">Na Stanie</div>
+      <div class="stat-value" id="stat-stanie">0</div>
+      <div class="stat-sub">Gotowe do sprzedaży</div>
+    </div>
+
+    <div class="stat-card" style="--card-accent: var(--status-sprzedany);">
+      <div class="stat-label">Łączny Zysk Netto</div>
+      <div class="stat-value" id="stat-zysk">0.00 PLN</div>
+      <div class="stat-sub" id="stat-sprzedane-sub">Sprzedanych: 0</div>
+    </div>
+  </div>
+
+  <main>
+    <div class="panel-card">
+      <div class="controls-row">
+        <h2 style="font-size: 18px; font-weight: 600;">Magazyn Zegarków</h2>
+        <div class="filter-group">
+          <button class="filter-btn active" onclick="filterStatus('all', this)">Wszystkie</button>
+          <button class="filter-btn" onclick="filterStatus('KUPIONY_W_DRODZE', this)">W drodze</button>
+          <button class="filter-btn" onclick="filterStatus('NA_STANIE', this)">Na stanie</button>
+          <button class="filter-btn" onclick="filterStatus('SPRZEDANY', this)">Sprzedane</button>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Zegarek</th>
+              <th>Marka / Model</th>
+              <th>Nr Referencyjny</th>
+              <th>Status</th>
+              <th>Łączny Koszt</th>
+              <th>Sprzedaż Netto</th>
+              <th>Zysk Netto</th>
+              <th>Akcje</th>
+            </tr>
+          </thead>
+          <tbody id="watch-table-body">
+            <tr>
+              <td colspan="8" class="empty-state">Ładowanie magazynu...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- MODAL: DODANIE ZEGARKA -->
+  <div class="modal-overlay" id="modal-add">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Dodaj nowy zegarek do bazy</h3>
+        <button class="btn btn-secondary" onclick="closeModal('modal-add')">✕</button>
+      </div>
+      <form id="form-add-watch" onsubmit="submitAddWatch(event)">
+        <div class="form-group">
+          <label>Marka</label>
+          <input type="text" id="add-marka" class="form-control" placeholder="np. Seiko" required>
+        </div>
+        <div class="form-group">
+          <label>Model</label>
+          <input type="text" id="add-model" class="form-control" placeholder="np. Speedtimer 6139" required>
+        </div>
+        <div class="form-group">
+          <label>Nr Referencyjny</label>
+          <input type="text" id="add-ref" class="form-control" placeholder="np. 6139-6002">
+        </div>
+        <div style="display: flex; gap: 12px;">
+          <div class="form-group" style="flex:1;">
+            <label>Cena Zakupu (PLN)</label>
+            <input type="number" step="0.01" id="add-cena" class="form-control" placeholder="1200" required>
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>Wysyłka (PLN)</label>
+            <input type="number" step="0.01" id="add-wysylka" class="form-control" placeholder="50">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Platforma Zakupu</label>
+          <select id="add-platforma" class="form-control">
+            <option value="Catawiki">Catawiki</option>
+            <option value="Allegro">Allegro</option>
+            <option value="Inna">Inna</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">Zapisz w Bazie</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: REJESTRACJA SPRZEDAŻY -->
+  <div class="modal-overlay" id="modal-sell">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Rejestracja Sprzedaży Zegarka</h3>
+        <button class="btn btn-secondary" onclick="closeModal('modal-sell')">✕</button>
+      </div>
+      <form id="form-sell-watch" onsubmit="submitSellWatch(event)">
+        <input type="hidden" id="sell-watch-id">
+        <div class="form-group">
+          <label>Kwota Sprzedaży (PLN)</label>
+          <input type="number" step="0.01" id="sell-cena" class="form-control" placeholder="np. 2500" required>
+        </div>
+        <div style="display: flex; gap: 12px;">
+          <div class="form-group" style="flex:1;">
+            <label>Prowizja (PLN)</label>
+            <input type="number" step="0.01" id="sell-prowizja" class="form-control" placeholder="0">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>Wysyłka Wyjściowa (PLN)</label>
+            <input type="number" step="0.01" id="sell-wysylka" class="form-control" placeholder="20">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Platforma Sprzedaży</label>
+          <select id="sell-platforma" class="form-control">
+            <option value="OLX">OLX</option>
+            <option value="Chrono24">Chrono24</option>
+            <option value="Vinted">Vinted</option>
+            <option value="Inna">Inna</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">Oznacz jako Sprzedany</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let currentFilter = 'all';
+
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/stats');
+        const data = await res.json();
+        document.getElementById('stat-kapital').innerText = `${data.zamrozonyKapital.toFixed(2)} PLN`;
+        document.getElementById('stat-drodze').innerText = data.wDrodzeCount;
+        document.getElementById('stat-stanie').innerText = data.naStanieCount;
+        document.getElementById('stat-zysk').innerText = `${data.lacznyZyskNetto.toFixed(2)} PLN`;
+        document.getElementById('stat-sprzedane-sub').innerText = `Sprzedanych: ${data.sprzedanyCount}`;
+      } catch (e) {
+        console.error('Błąd pobierania statystyk:', e);
+      }
+    }
+
+    async function loadWatches() {
+      try {
+        const res = await fetch(`/api/zegarki?status=${currentFilter}`);
+        const list = await res.json();
+        const tbody = document.getElementById('watch-table-body');
+
+        if (!list || list.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="8" class="empty-state">Brak zegarków w tym widoku.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = list.map(z => {
+          const defaultImg = 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100&auto=format&fit=crop';
+          const img = z.zdjecie_url || defaultImg;
+          const lacznyKoszt = z.zakup ? z.zakup.laczny_koszt : 0;
+          const przychodNetto = z.sprzedaz ? z.sprzedaz.przychod_netto : 0;
+          const zysk = z.sprzedaz ? (przychodNetto - lacznyKoszt) : 0;
+
+          let badgeClass = 'badge-drodze';
+          let statusText = 'W drodze';
+          if (z.status === 'NA_STANIE') { badgeClass = 'badge-stanie'; statusText = 'Na stanie'; }
+          if (z.status === 'SPRZEDANY') { badgeClass = 'badge-sprzedany'; statusText = 'Sprzedany'; }
+
+          return `
+            <tr>
+              <td><img src="${img}" class="watch-thumb" alt="photo"></td>
+              <td>
+                <div style="font-weight: 600;">${z.marka}</div>
+                <div style="font-size: 13px; color: var(--text-muted);">${z.model}</div>
+              </td>
+              <td><code>${z.nr_referencyjny || 'Brak'}</code></td>
+              <td><span class="badge ${badgeClass}">${statusText}</span></td>
+              <td class="price-tag">${lacznyKoszt.toFixed(2)} PLN</td>
+              <td>${z.sprzedaz ? `${przychodNetto.toFixed(2)} PLN` : '-'}</td>
+              <td>${z.sprzedaz ? `<span class="profit-positive">+${zysk.toFixed(2)} PLN</span>` : '-'}</td>
+              <td>
+                <div class="actions-cell">
+                  ${z.status === 'KUPIONY_W_DRODZE' ? `<button class="btn btn-secondary" onclick="updateStatus('${z.id}', 'NA_STANIE')">📥 Odbierz</button>` : ''}
+                  ${z.status !== 'SPRZEDANY' ? `<button class="btn btn-primary" onclick="openSellModal('${z.id}')">💰 Sprzedano</button>` : ''}
+                  <button class="btn btn-secondary" onclick="deleteWatch('${z.id}')" style="color: #ef4444;">🗑️</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {
+        console.error('Błąd pobierania listy zegarków:', e);
+      }
+    }
+
+    function filterStatus(status, btn) {
+      currentFilter = status;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadWatches();
+    }
+
+    async function updateStatus(id, newStatus) {
+      await fetch(`/api/zegarki/${id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      loadWatches();
+      loadStats();
+    }
+
+    function openAddModal() { document.getElementById('modal-add').classList.add('active'); }
+    function openSellModal(id) {
+      document.getElementById('sell-watch-id').value = id;
+      document.getElementById('modal-sell').classList.add('active');
+    }
+    function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+    async function submitAddWatch(e) {
+      e.preventDefault();
+      const body = {
+        marka: document.getElementById('add-marka').value,
+        model: document.getElementById('add-model').value,
+        nr_referencyjny: document.getElementById('add-ref').value,
+        cena_mlotkowa: document.getElementById('add-cena').value,
+        koszt_wysylki: document.getElementById('add-wysylka').value,
+        platforma_zakupu: document.getElementById('add-platforma').value
+      };
+
+      await fetch('/api/zegarki', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      closeModal('modal-add');
+      loadWatches();
+      loadStats();
+    }
+
+    async function submitSellWatch(e) {
+      e.preventDefault();
+      const id = document.getElementById('sell-watch-id').value;
+      const body = {
+        cena_sprzedazy: document.getElementById('sell-cena').value,
+        prowizja_sprzedazy: document.getElementById('sell-prowizja').value,
+        koszt_wysylki_out: document.getElementById('sell-wysylka').value,
+        platforma_sprzedazy: document.getElementById('sell-platforma').value
+      };
+
+      await fetch(`/api/zegarki/${id}/sprzedaz`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      closeModal('modal-sell');
+      loadWatches();
+      loadStats();
+    }
+
+    async function deleteWatch(id) {
+      if (confirm('Czy na pewno chcesz usunąć ten zegarek z bazy?')) {
+        await fetch(`/api/zegarki/${id}`, { method: 'DELETE' });
+        loadWatches();
+        loadStats();
+      }
+    }
+
+    async function triggerScan() {
+      const btn = document.getElementById('btn-scan');
+      btn.innerText = '⏳ Skanowanie...';
+      try {
+        await fetch('/api/scrape/trigger', { method: 'POST' });
+        setTimeout(() => {
+          btn.innerText = '⚡ Skanuj Aukcje Teraz';
+          loadWatches();
+          loadStats();
+        }, 3000);
+      } catch (e) {
+        btn.innerText = '⚡ Skanuj Aukcje Teraz';
+      }
+    }
+
+    // Pierwsze załadowanie danych
+    loadStats();
+    loadWatches();
+  </script>
+</body>
+</html>

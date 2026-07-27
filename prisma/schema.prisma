@@ -1,0 +1,52 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Główna tabela magazynu
+model Zegarek {
+  id              String    @id @default(uuid())
+  marka           String
+  model           String
+  nr_referencyjny String?
+  stan            String?   // np. "Bardzo dobry", "Nienoszony"
+  full_set        Boolean   @default(false)
+  zdjecie_url     String?
+  status          String    @default("KUPIONY_W_DRODZE") // KUPIONY_W_DRODZE, NA_STANIE, SPRZEDANY
+  link_oferty     String?
+  zakup           Zakup?
+  sprzedaz        Sprzedaz?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// Dane finansowe zakupu
+model Zakup {
+  id                 String   @id @default(uuid())
+  zegarekId          String   @unique
+  zegarek            Zegarek  @relation(fields: [zegarekId], references: [id], onDelete: Cascade)
+  data_zakupu        DateTime @default(now())
+  cena_mlotkowa      Float    // kwota zakupu
+  prowizja_platformy Float    @default(0)
+  koszt_wysylki      Float    @default(0)
+  koszt_serwisu      Float    @default(0)
+  platforma_zakupu   String   // "Catawiki" lub "Allegro"
+  laczny_koszt       Float    // Obliczane przed zapisem: mlotkowe + prowizja + wysylka + serwis
+}
+
+// Dane finansowe sprzedaży
+model Sprzedaz {
+  id                  String   @id @default(uuid())
+  zegarekId           String   @unique
+  zegarek             Zegarek  @relation(fields: [zegarekId], references: [id], onDelete: Cascade)
+  data_sprzedazy      DateTime @default(now())
+  cena_sprzedazy      Float
+  prowizja_sprzedazy  Float    @default(0)
+  koszt_wysylki_out   Float    @default(0)
+  platforma_sprzedazy String   // "OLX", "Chrono24", "Vinted"
+  przychod_netto      Float    // Obliczane przed zapisem: cena - prowizja - wysylka
+}
