@@ -205,8 +205,19 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
     return { avgPrice: 0, count: 0, breakdown: portalBreakdown };
   }
 
-  // Odrzuć wartości skrajne (odchylenia) i wylicz średnią
+  // Odrzuć wartości skrajne (odchylenia) i wylicz średnią oraz medianę
   collectedPrices.sort((a, b) => a - b);
+  let trimmedPrices = collectedPrices;
+  if (collectedPrices.length >= 4) {
+    trimmedPrices = collectedPrices.slice(1, collectedPrices.length - 1);
+  }
+
+  const sum = trimmedPrices.reduce((acc, p) => acc + p, 0);
+  const avgPrice = Math.round(sum / trimmedPrices.length);
+
+  const mid = Math.floor(trimmedPrices.length / 2);
+  const medianPrice = trimmedPrices.length % 2 !== 0 ? trimmedPrices[mid] : Math.round((trimmedPrices[mid - 1] + trimmedPrices[mid]) / 2);
+
   const breakdownSummary = [];
   if (portalBreakdown.olx.length > 0) breakdownSummary.push(`OLX: ${portalBreakdown.olx.length} ofert, śr. ${Math.round(portalBreakdown.olx.reduce((a, b) => a + b, 0) / portalBreakdown.olx.length)} PLN`);
   if (portalBreakdown.allegro.length > 0) breakdownSummary.push(`Allegro: ${portalBreakdown.allegro.length} ofert, śr. ${Math.round(portalBreakdown.allegro.reduce((a, b) => a + b, 0) / portalBreakdown.allegro.length)} PLN`);

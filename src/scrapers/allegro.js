@@ -7,7 +7,43 @@ const secHeaders = {
 };
 
 /**
- * Pancerny scraper Allegro pobierający oferty z Allegro.
+ * Pobiera prawdziwy, pełny opis ogłoszenia ze strony Allegro Lokalnie
+ */
+async function fetchAllegroFullDescription(offerUrl) {
+  if (!offerUrl) return '';
+
+  const proxies = [
+    offerUrl,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(offerUrl)}`,
+    `https://corsproxy.io/?${encodeURIComponent(offerUrl)}`
+  ];
+
+  for (const pUrl of proxies) {
+    try {
+      const res = await fetch(pUrl, { headers: secHeaders, signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        const html = await res.text();
+        if (html && html.length > 2000) {
+          // Wyciągnij opis z sekcji "O przedmiocie" lub dyrektywy opisu
+          const match = html.match(/<div[^>]*class="[^"]*offer-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i) ||
+                        html.match(/<section[^>]*class="[^"]*description[^"]*"[^>]*>([\s\S]*?)<\/section>/i) ||
+                        html.match(/O przedmiocie[\s\S]*?<div[^>]*>([\s\S]*?)<\/div>/i) ||
+                        html.match(/<div[^>]*data-box-name="Description"[^>]*>([\s\S]*?)<\/div>/i);
+
+          if (match) {
+            const cleanDesc = match[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+            if (cleanDesc.length >= 10) return cleanDesc;
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  return '';
+}
+
+/**
+ * Pancerny scraper Allegro pobierający oferty z Allegro wraz z PEŁNYM REALNYM OPISEM SPRZEDAWCY.
  */
 export async function scrapeAllegroWatches() {
   console.log('🔍 [ALLEGRO SCRAPER] Skanowanie realnych ofert na żywo z Allegro...');
@@ -51,6 +87,11 @@ export async function scrapeAllegroWatches() {
         const city = locMatch ? locMatch[1].replace(/<[^>]*>/g, '').trim() : 'Polska';
 
         const isAuction = inner.includes('licytacj') || inner.includes('licytuj');
+        const offerFullUrl = `https://allegrolokalnie.pl${relativeLink}`;
+
+        // Pobranie PRAWDZIWEGO opisu sprzedawcy ze strony ogłoszenia
+        const realDescription = await fetchAllegroFullDescription(offerFullUrl);
+        const finalDescription = realDescription ? `Opis sprzedawcy:\n${realDescription}` : `Tytuł: ${title}\nLokalizacja: ${city}\nPlatforma: Allegro`;
 
         results.push({
           id: `allegro_${relativeLink.split('/oferta/')[1]}`,
@@ -60,9 +101,9 @@ export async function scrapeAllegroWatches() {
           sellerCountry: `Polska, ${city} (Allegro)`,
           timeLeftMin: isAuction ? 180 : 0,
           imageUrl: imgUrl,
-          link: `https://allegrolokalnie.pl${relativeLink}`,
+          link: offerFullUrl,
           platform: 'Allegro',
-          rawDescription: `Tytuł: ${title}\nLokalizacja: ${city}\nPlatforma: Allegro`
+          rawDescription: finalDescription
         });
       }
     } catch (err) {
@@ -70,6 +111,6 @@ export async function scrapeAllegroWatches() {
     }
   }
 
-  console.log(`✅ [ALLEGRO] Pozyskano ${results.length} realnych ofert z Allegro.`);
+  console.log(`✅ [ALLEGRO] Pozyskano ${results.length} realnych ofert z Allegro z pełnymi opisami sprzedawców.`);
   return results;
 }

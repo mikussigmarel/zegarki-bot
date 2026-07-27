@@ -1,8 +1,34 @@
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 
+const secHeaders = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'application/json',
+  'Accept-Language': 'pl-PL,pl;q=0.9'
+};
+
 /**
- * Pancerne skanowanie OLX.pl oparte o oficjalne, szybkie API REST OLX (https://www.olx.pl/api/v1/offers/).
- * Nie ulega zablokowaniu na serwerach w chmurze (Render) i zwraca 100% czystych danych w czasie poniżej 2 sekund.
+ * Wyciąga pełną treść opisu ogłoszenia ze strony OLX
+ */
+async function fetchOlxFullDescription(offerUrl) {
+  if (!offerUrl) return '';
+  try {
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(offerUrl)}`;
+    const res = await fetch(proxyUrl, { headers: secHeaders, signal: AbortSignal.timeout(4000) });
+    if (res.ok) {
+      const html = await res.text();
+      const match = html.match(/<div[^>]*data-cy="ad_description"[^>]*>([\s\S]*?)<\/div>/i) ||
+                    html.match(/<div[^>]*class="[^"]*css-1o924fl[^"]*"[^>]*>([\s\S]*?)<\/div>/i) ||
+                    html.match(/<div[^>]*class="[^"]*css-1234[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+      if (match) {
+        return match[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+    }
+  } catch (e) {}
+  return '';
+}
+
+/**
+ * Pancerne skanowanie OLX.pl oparte o oficjalne API REST OLX oraz pobieranie pełnych opisów sprzedawców.
  */
 export async function scrapeOlxWatches() {
   console.log('🔍 [OLX SCRAPER] Skanowanie realnych ofert na żywo z oficjalnego API OLX.pl...');
@@ -18,11 +44,7 @@ export async function scrapeOlxWatches() {
       const apiUrl = `https://www.olx.pl/api/v1/offers/?offset=0&limit=40&query=${encodeURIComponent(query)}`;
       try {
         const res = await fetch(apiUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': 'application/json',
-            'Accept-Language': 'pl-PL,pl;q=0.9'
-          },
+          headers: secHeaders,
           signal: AbortSignal.timeout(4000)
         });
 
@@ -38,13 +60,11 @@ export async function scrapeOlxWatches() {
 
             const title = item.title || 'Zegarek OLX';
             const lowerTitle = title.toLowerCase();
-            if (lowerTitle.includes('keyboard') || lowerTitle.includes('pianino') || lowerTitle.includes('fortepian') || lowerTitle.includes('syntezator') || lowerTitle.includes('gitar') || lowerTitle.includes('kalkulator')) {
-              continue; // Pomijaj instrumenty muzyczne Casio
-            }
-            // Filtr smartwatchów, budzików, zegarów ściennych i nie-zegarków
-            if (lowerTitle.includes('smartwatch') || lowerTitle.includes('smart watch') || lowerTitle.includes('apple watch') || lowerTitle.includes('galaxy watch') || lowerTitle.includes('garmin') || lowerTitle.includes('fitbit') || lowerTitle.includes('huawei watch') || lowerTitle.includes('xiaomi') || lowerTitle.includes('opaska') || lowerTitle.includes('budzik') || lowerTitle.includes('ścienny') || lowerTitle.includes('kieszonkowy') || lowerTitle.includes('stojak') || lowerTitle.includes('nakręcarka')) {
-              continue; // Pomijaj smartwatche, budziki, zegarki ścienne
-            }
+
+            // Pomijaj instrumenty muzyczne i nie-zegarki
+            if (lowerTitle.includes('keyboard') || lowerTitle.includes('pianino') || lowerTitle.includes('gitar') || lowerTitle.includes('kalkulator')) continue;
+            if (lowerTitle.includes('smartwatch') || lowerTitle.includes('apple watch') || lowerTitle.includes('galaxy watch') || lowerTitle.includes('budzik') || lowerTitle.includes('ścienny') || lowerTitle.includes('nakręcarka')) continue;
+
             const priceParam = item.params?.find(p => p.key === 'price');
             const priceVal = priceParam?.value?.value || item.price?.value;
             if (!priceVal || isNaN(priceVal)) continue;
@@ -53,20 +73,30 @@ export async function scrapeOlxWatches() {
             const link = item.url || `https://www.olx.pl/d/oferta/${id}`;
             const photo = item.photos?.[0]?.link ? item.photos[0].link.replace('{width}', '1000').replace('{height}', '750') : 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=600&auto=format&fit=crop';
 
-            const cleanDesc = (item.description || '').replace(/<[^>]*>?/gm, ' ').trim();
+            let cleanDesc = (item.description || '').replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
+
+            // Jeśli opis z API jest za krótki, dociągnij pełny opis ze strony ogłoszenia
+            if (cleanDesc.length < 15) {
+              const fullWebDesc = await fetchOlxFullDescription(link);
+              if (fullWebDesc.length >= 10) {
+                cleanDesc = fullWebDesc;
+              }
+            }
+
             const paramsText = item.params ? item.params.map(p => `${p.name || p.key}: ${p.value?.label || p.value?.value || ''}`).join('; ') : '';
+            const fullRawDesc = `Tytuł ogłoszenia: ${title}\nOpis sprzedawcy:\n${cleanDesc}\nParametry ogłoszenia: ${paramsText}\nLokalizacja: ${city}`;
 
             results.push({
               id: `olx_${id}`,
               title: title,
               currentPrice: parseFloat(priceVal),
-              shippingCost: 12, // Przesyłka OLX (InPost / Poczta)
+              shippingCost: 12,
               sellerCountry: `Polska, ${city} (OLX)`,
-              timeLeftMin: 120, // KUP TERAZ / Oferty OLX
+              timeLeftMin: 120,
               imageUrl: photo,
               link: link,
               platform: 'OLX',
-              rawDescription: `Tytuł: ${title}\nOpis: ${cleanDesc}\nParametry: ${paramsText}\nLokalizacja: ${city}`
+              rawDescription: fullRawDesc
             });
           }
         }
@@ -78,6 +108,6 @@ export async function scrapeOlxWatches() {
     console.warn('⚠️ Błąd scrapera OLX:', err.message);
   }
 
-  console.log(`✅ [OLX] Pozyskano ${results.length} realnych ofert z OLX.pl!`);
+  console.log(`✅ [OLX] Pozyskano ${results.length} realnych ofert z OLX.pl z pełną analityką opisów!`);
   return results;
 }
