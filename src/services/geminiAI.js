@@ -93,7 +93,7 @@ async function callOpenRouterAI(prompt, base64Data = null, mimeType = 'image/jpe
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   if (!openRouterKey) return null;
 
-  const modelName = process.env.OPENROUTER_MODEL || 'nvidia/nemotron-nano-12b-v2-vl:free';
+  const modelName = process.env.OPENROUTER_MODEL || 'inclusionai/ling-3.0-flash:free';
 
   const content = [];
   content.push({ type: 'text', text: prompt });

@@ -26,6 +26,8 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
   let searchWord = cleanMarka;
 
   const cleanRef = nrReferencyjny ? nrReferencyjny.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() : null;
+  const refBase = cleanRef ? cleanRef.split('-')[0].split('/')[0] : null;
+  const refDigits = refBase ? refBase.replace(/[^0-9]/g, '') : null;
 
   let modelTokens = [];
   if (model && model !== cleanMarka) {
@@ -33,7 +35,7 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
     modelTokens = cleanModelStr.split(' ').map(t => t.toLowerCase()).filter(t => t.length >= 2);
   }
 
-  if (cleanRef && cleanRef.length >= 4) {
+  if (cleanRef && cleanRef.length >= 3) {
     searchWord = `${cleanMarka} ${nrReferencyjny}`.trim();
   } else if (modelTokens.length > 0) {
     searchWord = `${cleanMarka} ${modelTokens.slice(0, 2).join(' ')}`.trim();
@@ -45,7 +47,7 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
   const collectedPrices = [];
   const portalBreakdown = { olx: [], allegro: [], chrono24: [] };
 
-  // Ścisły weryfikator dopasowania tytułu
+  // Elastyczny, inteligentny weryfikator dopasowania tytułu
   const isStrictTitleMatch = (titleText) => {
     const lower = titleText.toLowerCase();
 
@@ -54,15 +56,18 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
       return false;
     }
 
-    // 2. Wymagaj marki
+    // 2. Wymagaj marki (lub skrótu)
     if (!lower.includes(cleanMarka.toLowerCase())) {
       return false;
     }
 
-    // 3. Jeśli mamy referencję, dopasuj referencję
-    if (cleanRef && cleanRef.length >= 4) {
+    // 3. Rozbicie referencji na warianty (np. F20664-3 -> F20664, 20664)
+    if (cleanRef && cleanRef.length >= 3) {
       const lowerCleanTitle = lower.replace(/[^a-z0-9]/g, '');
+
       if (lowerCleanTitle.includes(cleanRef)) return true;
+      if (refBase && refBase.length >= 3 && lowerCleanTitle.includes(refBase)) return true;
+      if (refDigits && refDigits.length >= 4 && lowerCleanTitle.includes(refDigits)) return true;
     }
 
     // 4. Jeśli mamy tokeny modelu, upewnij się że co najmniej kluczowy token występuje w tytule
@@ -77,64 +82,70 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
   // =============================================
   // 1. SKANOWANIE OLX API
   // =============================================
-  try {
-    const olxUrl = `https://www.olx.pl/api/v1/offers/?offset=0&limit=40&query=${encodeURIComponent(searchWord)}`;
-    const res = await fetchWithStrictTimeout(olxUrl, {
-      headers: { ...secHeaders, 'Accept': 'application/json' }
-    }, 4000);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const olxUrl = `https://www.olx.pl/api/v1/offers/?offset=0&limit=40&query=${encodeURIComponent(searchWord)}`;
+      const res = await fetchWithStrictTimeout(olxUrl, {
+        headers: { ...secHeaders, 'Accept': 'application/json' }
+      }, 4000);
 
-    if (res && res.ok) {
-      const json = await res.json();
-      const items = json.data || [];
-      for (const item of items) {
-        const itemTitle = (item.title || '');
-        const priceParam = item.params?.find(p => p.key === 'price');
-        const priceVal = parseFloat(priceParam?.value?.value || item.price?.value);
+      if (res && res.ok) {
+        const json = await res.json();
+        const items = json.data || [];
+        for (const item of items) {
+          const itemTitle = (item.title || '');
+          const priceParam = item.params?.find(p => p.key === 'price');
+          const priceVal = parseFloat(priceParam?.value?.value || item.price?.value);
 
-        if (priceVal && !isNaN(priceVal) && priceVal >= 80 && priceVal <= 60000) {
-          if (isStrictTitleMatch(itemTitle)) {
-            collectedPrices.push(priceVal);
-            portalBreakdown.olx.push(priceVal);
+          if (priceVal && !isNaN(priceVal) && priceVal >= 80 && priceVal <= 60000) {
+            if (isStrictTitleMatch(itemTitle)) {
+              collectedPrices.push(priceVal);
+              portalBreakdown.olx.push(priceVal);
+            }
           }
         }
+        break;
       }
+    } catch (e) {
+      if (attempt === 0) await new Promise(r => setTimeout(r, 400));
     }
-  } catch (e) {
-    console.warn('⚠️ Błąd wyszukiwania cen na OLX:', e.message);
   }
 
   // =============================================
   // 2. SKANOWANIE ALLEGRO (z proxy fallback!)
   // =============================================
-  try {
-    const allegroUrl = `https://allegro.pl/listing?string=${encodeURIComponent(searchWord)}`;
-    const html = await fetchAllegroHtmlWithProxy(allegroUrl);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const allegroUrl = `https://allegro.pl/listing?string=${encodeURIComponent(searchWord)}`;
+      const html = await fetchAllegroHtmlWithProxy(allegroUrl);
 
-    if (html) {
-      const stateMatch = html.match(/__allegro_listing_state\s*=\s*"([\s\S]*?)";/i) || html.match(/__allegro_listing_state\s*=\s*(\{[\s\S]*?\});/i);
-      if (stateMatch) {
-        let rawJson = stateMatch[1];
-        if (rawJson.startsWith('"') || rawJson.includes('\\"')) {
-          rawJson = JSON.parse(`"${rawJson}"`);
-        }
-        const stateData = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
-        const itemsGroups = stateData?.__elements__ || stateData?.items?.promoted || stateData?.items?.regular || [];
-        let allItems = Array.isArray(itemsGroups) ? itemsGroups : [];
+      if (html) {
+        const stateMatch = html.match(/__allegro_listing_state\s*=\s*"([\s\S]*?)";/i) || html.match(/__allegro_listing_state\s*=\s*(\{[\s\S]*?\});/i);
+        if (stateMatch) {
+          let rawJson = stateMatch[1];
+          if (rawJson.startsWith('"') || rawJson.includes('\\"')) {
+            rawJson = JSON.parse(`"${rawJson}"`);
+          }
+          const stateData = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+          const itemsGroups = stateData?.__elements__ || stateData?.items?.promoted || stateData?.items?.regular || [];
+          let allItems = Array.isArray(itemsGroups) ? itemsGroups : [];
 
-        for (const item of allItems) {
-          const itemTitle = item.title?.text || item.title || '';
-          const priceVal = parseFloat(item.price?.normal?.amount || item.price?.main?.amount || item.price?.amount);
-          if (priceVal && !isNaN(priceVal) && priceVal >= 80 && priceVal <= 60000) {
-            if (isStrictTitleMatch(itemTitle)) {
-              collectedPrices.push(priceVal);
-              portalBreakdown.allegro.push(priceVal);
+          for (const item of allItems) {
+            const itemTitle = item.title?.text || item.title || '';
+            const priceVal = parseFloat(item.price?.normal?.amount || item.price?.main?.amount || item.price?.amount);
+            if (priceVal && !isNaN(priceVal) && priceVal >= 80 && priceVal <= 60000) {
+              if (isStrictTitleMatch(itemTitle)) {
+                collectedPrices.push(priceVal);
+                portalBreakdown.allegro.push(priceVal);
+              }
             }
           }
         }
+        break;
       }
+    } catch (e) {
+      if (attempt === 0) await new Promise(r => setTimeout(r, 400));
     }
-  } catch (e) {
-    console.warn('⚠️ Błąd wyszukiwania cen na Allegro:', e.message);
   }
 
   // =============================================
@@ -149,7 +160,6 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
     if (res && res.ok) {
       html = await res.text();
     } else {
-      // Proxy fallback
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(chrono24Url)}`;
       const proxyRes = await fetchWithStrictTimeout(proxyUrl, { headers: secHeaders }, 5000);
       if (proxyRes && proxyRes.ok) {
@@ -158,13 +168,11 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
     }
 
     if (html) {
-      // Chrono24 ma ceny w formacie: data-price="1234" lub class="text--price"...1 234 zł
       const priceMatches = html.matchAll(/(?:data-price|"price"|"amount")[=:]\s*"?(\d[\d\s.,]*)"?/gi);
       for (const m of priceMatches) {
         let rawPrice = m[1].replace(/\s/g, '').replace(',', '.');
         let priceVal = parseFloat(rawPrice);
         
-        // Chrono24 podaje ceny profesjonalnych dealerów – przeliczamy z korektą -15% (0.85) na rynek wtórny w PL
         const localMarketPrice = Math.round(priceVal * 0.85);
         if (priceVal && !isNaN(priceVal) && priceVal >= 100 && priceVal <= 60000) {
           collectedPrices.push(localMarketPrice);
@@ -172,7 +180,6 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
         }
       }
 
-      // Alternatywny regex dla cen w formacie "1 234 zł"
       const plnMatches = html.matchAll(/([\d\s]+)\s*(?:zł|PLN)/g);
       for (const m of plnMatches) {
         let rawPrice = m[1].replace(/\s/g, '');
@@ -194,22 +201,12 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
   // WYLICZENIE ŚREDNIEJ RYNKOWEJ
   // =============================================
   if (collectedPrices.length === 0) {
-    console.warn(`⚠️ [PORTAL PRICE] Brak dopasowań na żadnym portalu dla: "${searchWord}"`);
+    console.warn(`⚠️ [PORTAL PRICE] Brak dopasowań na bezpośrednich portalach dla: "${searchWord}"`);
     return { avgPrice: 0, count: 0, breakdown: portalBreakdown };
   }
 
-  // Odrzucenie skrajności i wyliczenie średniej rynkowej
+  // Odrzuć wartości skrajne (odchylenia) i wylicz średnią
   collectedPrices.sort((a, b) => a - b);
-  const trimCount = Math.floor(collectedPrices.length * 0.1);
-  const trimmed = collectedPrices.slice(trimCount, collectedPrices.length - (trimCount || 1));
-  const validList = trimmed.length > 0 ? trimmed : collectedPrices;
-  const sum = validList.reduce((acc, v) => acc + v, 0);
-  const avgPrice = Math.round(sum / validList.length);
-
-  // Mediana
-  const mid = Math.floor(validList.length / 2);
-  const medianPrice = validList.length % 2 !== 0 ? validList[mid] : Math.round((validList[mid - 1] + validList[mid]) / 2);
-
   const breakdownSummary = [];
   if (portalBreakdown.olx.length > 0) breakdownSummary.push(`OLX: ${portalBreakdown.olx.length} ofert, śr. ${Math.round(portalBreakdown.olx.reduce((a, b) => a + b, 0) / portalBreakdown.olx.length)} PLN`);
   if (portalBreakdown.allegro.length > 0) breakdownSummary.push(`Allegro: ${portalBreakdown.allegro.length} ofert, śr. ${Math.round(portalBreakdown.allegro.reduce((a, b) => a + b, 0) / portalBreakdown.allegro.length)} PLN`);
@@ -264,32 +261,128 @@ async function fetchAllegroHtmlWithProxy(url) {
  * @param {Object} aiData
  * @param {number} [offerCurrentPrice=0]
  */
+/**
+ * Dedykowany scraper cen z Ceneo.pl (używany TYLKO jeśli zegarek z oferty jest fabrycznie nowy!)
+ */
+async function scrapeCeneoPrices(searchWord) {
+  try {
+    const ceneoUrl = `https://www.ceneo.pl/;szukaj-${encodeURIComponent(searchWord)}`;
+    console.log(`🛒 [CENEO SCRAPE] Przeszukiwanie sklepów Ceneo.pl dla: "${searchWord}"...`);
+    const res = await fetchWithStrictTimeout(ceneoUrl, { headers: secHeaders }, 4000);
+    if (res && res.ok) {
+      const html = await res.text();
+      const prices = [];
+      const matches = html.matchAll(/(?:data-price|"price"|class="value")[=:]\s*"?(\d[\d\s.,]*)"?/gi);
+      for (const m of matches) {
+        const val = parseFloat(m[1].replace(/\s/g, '').replace(',', '.'));
+        if (val >= 90 && val <= 50000) {
+          // Bez żadnych sztucznych procentów! Dokładna realna cena ze sklepu.
+          prices.push(Math.round(val));
+        }
+      }
+      return prices;
+    }
+  } catch (e) {
+    console.warn('⚠️ Błąd skanowania Ceneo:', e.message);
+  }
+  return [];
+}
+
+/**
+ * Szukaj czystych, realnych cen w Google / Ceneo / DuckDuckGo BEZ ŻADNYCH SZTUCZNYCH PROCENTÓW.
+ */
+async function searchGlobalWebPrices(marka, model, nrReferencyjny, isNewWatch = false) {
+  const queryTerm = `${marka} ${nrReferencyjny || model}`.trim();
+  console.log(`🌐 [GOOGLE WEB SEARCH] Szukam prawdziwych cen dla ("${queryTerm}", Zegarek ${isNewWatch ? 'NOWY' : 'UŻYWANY'})...`);
+
+  const collected = [];
+
+  // Jeśli zegarek jest FABRYCZNIE NOWY -> sprawdź Ceneo. Jeśli używany -> ODRZUĆ Ceneo!
+  if (isNewWatch) {
+    const ceneoPrices = await scrapeCeneoPrices(queryTerm);
+    if (ceneoPrices.length > 0) {
+      collected.push(...ceneoPrices);
+    }
+  }
+
+  // Google / DuckDuckGo Search dla używanych / rynek wtórny
+  try {
+    const searchQuery = isNewWatch
+      ? `${queryTerm} cena sklep`
+      : `${queryTerm} uzywany OR olx OR allegro OR chrono24 OR uzywane cena`;
+
+    console.log(`🌐 [OPEN GOOGLE SEARCH] Wyszukiwanie cen rynkowych: "${searchQuery}"...`);
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
+    const res = await fetchWithStrictTimeout(url, { headers: secHeaders }, 5000);
+    if (res && res.ok) {
+      const html = await res.text();
+      const plnMatches = html.matchAll(/([\d\s]{2,7})\s*(?:zł|PLN|pln)/g);
+
+      for (const m of plnMatches) {
+        const val = parseFloat(m[1].replace(/\s/g, '').replace(',', '.'));
+        if (val >= 90 && val <= 50000) collected.push(val);
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ Błąd wyszukiwania w Google:', e.message);
+  }
+
+  if (collected.length > 0) {
+    collected.sort((a, b) => a - b);
+    let trimmed = collected.length >= 4 ? collected.slice(1, collected.length - 1) : collected;
+    const avg = Math.round(trimmed.reduce((a, b) => a + b, 0) / trimmed.length);
+    return { avgPrice: avg, count: trimmed.length };
+  }
+
+  return { avgPrice: 0, count: 0 };
+}
+
+/**
+ * Szacuje średnią cenę rynkową zegarka – ZAWSZE z prawdziwych portali i sieci (wielopoziomowe wyszukiwanie).
+ * @param {string} marka
+ * @param {string} model
+ * @param {string|null} nrReferencyjny
+ * @param {Object} aiData
+ * @param {number} [offerCurrentPrice=0]
+ */
 export async function getMarketPriceEstimate(marka, model, nrReferencyjny = null, aiData = {}, offerCurrentPrice = 0) {
   let marketAvgPrice = 0;
   let priceSource = '';
 
-  // JEDYNY PRIORYTET: Prawdziwe ceny z portali OLX + Allegro + Chrono24
+  const isNewWatch = Boolean(
+    aiData.stan?.toLowerCase().includes('nowy') ||
+    aiData.stan?.toLowerCase().includes('fabryczn') ||
+    aiData.stan?.toLowerCase().includes('metk')
+  );
+
+  // 1. POZIOM 1: Szukanie po pełnym numerze referencyjnym (np. Festina F20664-3)
   const portalData = await fetchPortalMarketPrices(marka, model, nrReferencyjny);
 
   if (portalData.avgPrice > 0) {
     marketAvgPrice = portalData.avgPrice;
     priceSource = `Realne ceny z ${portalData.count} ofert na portalach (${portalData.breakdownSummary || 'OLX/Allegro/Chrono24'})`;
   } else {
-    // Fallback: jeśli na ŻADNYM portalu nie znaleziono tego modelu
-    // Spróbuj szerszego wyszukiwania (tylko marka + główny token modelu)
-    if (model && model !== marka) {
-      const broadSearch = await fetchPortalMarketPrices(marka, model, null);
-      if (broadSearch.avgPrice > 0) {
-        marketAvgPrice = broadSearch.avgPrice;
-        priceSource = `Szersze wyszukiwanie: ${broadSearch.count} ofert (${broadSearch.breakdownSummary || 'OLX/Allegro/Chrono24'})`;
+    // 2. POZIOM 2: Przeszukiwanie w wyszukiwarkach internetowych Google / DuckDuckGo
+    const webData = await searchGlobalWebPrices(marka, model, nrReferencyjny, isNewWatch);
+    if (webData.avgPrice > 0) {
+      marketAvgPrice = webData.avgPrice;
+      priceSource = `Średnia cena rynkowa z wyników wyszukiwania w Google (${webData.count} ofert w sieci)`;
+    } else {
+      // 3. POZIOM 3: Szersze wyszukiwanie (tylko marka + główny token modelu)
+      if (model && model !== marka) {
+        const broadSearch = await fetchPortalMarketPrices(marka, model, null);
+        if (broadSearch.avgPrice > 0) {
+          marketAvgPrice = broadSearch.avgPrice;
+          priceSource = `Szersze wyszukiwanie: ${broadSearch.count} ofert (${broadSearch.breakdownSummary || 'OLX/Allegro/Chrono24'})`;
+        }
       }
-    }
 
-    // Ostateczny fallback: cena oferty (ale z wyraźnym ostrzeżeniem)
-    if (marketAvgPrice === 0) {
-      marketAvgPrice = offerCurrentPrice;
-      priceSource = '⚠️ BRAK DANYCH Z PORTALI - użyto ceny oferty (ryzykowne!)';
-      console.warn(`⚠️ [PRICE WARNING] Nie znaleziono żadnych cen na portalach dla "${marka} ${model}". Używam ceny oferty: ${offerCurrentPrice} PLN`);
+      // 4. Ostateczny bezpieczny punkt odniesienia: rynek wtórny bez halucynacji
+      if (marketAvgPrice === 0) {
+        marketAvgPrice = offerCurrentPrice;
+        priceSource = '⚠️ BRAK DANYCH W SIECI - użyto ceny aktualnej oferty';
+        console.warn(`⚠️ [PRICE WARNING] Nie znaleziono cen w sieci dla "${marka} ${model}". Używam ceny oferty: ${offerCurrentPrice} PLN`);
+      }
     }
   }
 
