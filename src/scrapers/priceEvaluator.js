@@ -25,20 +25,32 @@ export async function fetchPortalMarketPrices(marka, model, nrReferencyjny = nul
   const cleanMarka = (marka || '').trim();
   let searchWord = cleanMarka;
 
-  const cleanRef = nrReferencyjny ? nrReferencyjny.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() : null;
+  // Ignorowanie sztucznych zwrotów braku referencji
+  const invalidRefPhrases = ['niepodano', 'brak', 'nieokreslony', 'nieokreślony', 'na', 'n/a', 'brakdanych', 'nieznany', 'rozpoznano'];
+  let validRef = nrReferencyjny;
+  if (validRef) {
+    const rawClean = validRef.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    if (invalidRefPhrases.includes(rawClean) || rawClean.length < 3) {
+      validRef = null;
+    }
+  }
+
+  const cleanRef = validRef ? validRef.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() : null;
   const refBase = cleanRef ? cleanRef.split('-')[0].split('/')[0] : null;
   const refDigits = refBase ? refBase.replace(/[^0-9]/g, '') : null;
 
   let modelTokens = [];
-  if (model && model !== cleanMarka) {
+  if (model) {
     const cleanModelStr = model.replace(new RegExp(cleanMarka, 'gi'), '').trim();
-    modelTokens = cleanModelStr.split(' ').map(t => t.toLowerCase()).filter(t => t.length >= 2);
+    modelTokens = cleanModelStr.split(' ').map(t => t.toLowerCase()).filter(t => t.length >= 2 && !invalidRefPhrases.includes(t));
   }
 
-  if (cleanRef && cleanRef.length >= 3) {
-    searchWord = `${cleanMarka} ${nrReferencyjny}`.trim();
+  if (validRef && cleanRef && cleanRef.length >= 3) {
+    searchWord = `${cleanMarka} ${validRef}`.trim();
   } else if (modelTokens.length > 0) {
-    searchWord = `${cleanMarka} ${modelTokens.slice(0, 2).join(' ')}`.trim();
+    searchWord = `${cleanMarka} ${modelTokens.join(' ')}`.trim();
+  } else {
+    searchWord = `${cleanMarka} ${model || ''}`.trim();
   }
 
   console.log(`🔎 [PORTAL PRICE SCRAPE] Szukam cen TEGO KONKRETNEGO MODELU na OLX + Allegro + Chrono24: "${searchWord}"...`);

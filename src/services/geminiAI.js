@@ -10,7 +10,13 @@ async function callNvidiaVisionAI(prompt, base64Data = null, mimeType = 'image/j
     throw new Error('Brak skonfigurowanego klucza OPENROUTER_API_KEY w zmiennych środowiskowych!');
   }
 
-  const modelName = process.env.OPENROUTER_MODEL || 'nvidia/nemotron-nano-12b-v2-vl:free';
+  const fallbackModels = [
+    process.env.OPENROUTER_MODEL || 'nvidia/nemotron-nano-12b-v2-vl:free',
+    'mistralai/mistral-small-24b-instruct-2501:free',
+    'google/gemini-2.0-flash-exp:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'qwen/qwen-2.5-72b-instruct:free'
+  ];
 
   const content = [];
   content.push({ type: 'text', text: prompt });
@@ -24,9 +30,8 @@ async function callNvidiaVisionAI(prompt, base64Data = null, mimeType = 'image/j
     });
   }
 
-  console.log(`🚀 [NVIDIA AI] Analizuję ofertę zegarka silnikiem ${modelName}...`);
-
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (const modelName of fallbackModels) {
+    console.log(`🚀 [NVIDIA/OPENROUTER AI] Analizuję ofertę zegarka silnikiem ${modelName}...`);
     try {
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -51,13 +56,9 @@ async function callNvidiaVisionAI(prompt, base64Data = null, mimeType = 'image/j
       }
 
       const errText = await res.text();
-      console.warn(`⚠️ [NVIDIA AI] Próba ${attempt}/3 nie powiodła się: ${res.status} ${errText}`);
+      console.warn(`⚠️ [OPENROUTER AI] Model ${modelName} zwrócił status ${res.status}: ${errText.slice(0, 150)}`);
     } catch (e) {
-      console.warn(`⚠️ [NVIDIA AI] Próba ${attempt}/3 błąd połączenia: ${e.message}`);
-    }
-
-    if (attempt < 3) {
-      await new Promise(r => setTimeout(r, 1000));
+      console.warn(`⚠️ [OPENROUTER AI] Model ${modelName} błąd: ${e.message}`);
     }
   }
 
