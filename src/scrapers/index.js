@@ -68,7 +68,8 @@ export async function runScraperJob(forceAll = false) {
         processedOffersHistory.add(rawOffer.id);
 
         console.log(`\n--------------------------------------------------`);
-        console.log(`🤖 Analiza AI dla oferty: "${rawOffer.title}" (${rawOffer.platform}, ${rawOffer.currentPrice} PLN)...`);
+        // Płynny odstęp 2s zapobiegający naruszeniu limitu 30 RPM w Groq API
+        await new Promise(r => setTimeout(r, 2000));
 
         // Dociągnięcie pełnego opisu sprzedawcy z Allegro na żądanie dla wyselekcjonowanego kandydata
         if (rawOffer.platform === 'Allegro' && rawOffer.link) {

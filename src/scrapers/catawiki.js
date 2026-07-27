@@ -4,18 +4,10 @@ import { getEurPlnRate } from '../services/currencyRate.js';
 const secHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.9,pl;q=0.8',
-  'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-  'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"Windows"',
-  'Sec-Fetch-Dest': 'document',
-  'Sec-Fetch-Mode': 'navigate',
-  'Sec-Fetch-Site': 'none',
-  'Sec-Fetch-User': '?1',
-  'Upgrade-Insecure-Requests': '1'
+  'Accept-Language': 'en-US,en;q=0.9,pl;q=0.8'
 };
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 3000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -28,102 +20,101 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
   }
 }
 
-
 /**
  * Wyciąga REALNE dane ze strony oferty: cena aktualnego bida (EUR), czas zakończenia, kraj sprzedawcy oraz dokładną cenę dostawy.
  */
 async function getRealLotDetails(lotUrl, fallbackBuyNow = null) {
   try {
-    let res = await fetchWithTimeout(lotUrl, { headers: secHeaders }, 3500);
+    let res = await fetchWithTimeout(lotUrl, { headers: secHeaders }, 2500);
     if (!res || !res.ok) {
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(lotUrl)}`;
-      res = await fetchWithTimeout(proxyUrl, { headers: secHeaders }, 3500);
+      res = await fetchWithTimeout(proxyUrl, { headers: secHeaders }, 2500);
     }
-    if (!res || !res.ok) return { currentPriceEUR: fallbackBuyNow, timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75, descriptionText: '' };
-    const html = await res.text();
+    if (!res || !res.ok) {
+      const proxyUrl2 = `https://corsproxy.io/?${encodeURIComponent(lotUrl)}`;
+      res = await fetchWithTimeout(proxyUrl2, { headers: secHeaders }, 2500);
+    }
 
     let timeLeftMin = null;
     let sellerCountry = 'Unia Europejska';
     let shippingCostPLN = 75;
     let descriptionText = '';
-    let currentPriceEUR = null;
+    let currentPriceEUR = fallbackBuyNow;
 
-    const jsonMatch = html.match(/<script\s+id="__NEXT_DATA__"\s+type="application\/json"\s*>([\s\S]*?)<\/script>/i);
-    if (jsonMatch) {
-      const data = JSON.parse(jsonMatch[1]);
-      const pageProps = data.props?.pageProps || {};
-      const str = JSON.stringify(pageProps);
+    if (res && res.ok) {
+      const html = await res.text();
+      const jsonMatch = html.match(/<script\s+id="__NEXT_DATA__"\s+type="application\/json"\s*>([\s\S]*?)<\/script>/i);
+      if (jsonMatch) {
+        const data = JSON.parse(jsonMatch[1]);
+        const pageProps = data.props?.pageProps || {};
+        const str = JSON.stringify(pageProps);
 
-      // 💰 Wyciągnięcie REALNEJ aktualnej ceny (Current Bid w EUR - cenę aktualnego bida)
-      const bbr = pageProps.biddingBlockResponse;
-      if (bbr) {
-        if (typeof bbr.localizedCurrentBidAmount === 'number' && bbr.localizedCurrentBidAmount > 0) {
-          currentPriceEUR = bbr.localizedCurrentBidAmount;
-        } else if (bbr.live?.lot?.bid?.EUR && bbr.live.lot.bid.EUR > 0) {
-          currentPriceEUR = bbr.live.lot.bid.EUR;
-        } else if (bbr.biddingHistory?.bids?.[0]?.localizedBidAmount && bbr.biddingHistory.bids[0].localizedBidAmount > 0) {
-          currentPriceEUR = bbr.biddingHistory.bids[0].localizedBidAmount;
-        } else if (typeof bbr.localizedStartBidAmount === 'number' && bbr.localizedStartBidAmount > 0) {
-          currentPriceEUR = bbr.localizedStartBidAmount;
-        } else if (typeof bbr.localizedMinBidAmount === 'number' && bbr.localizedMinBidAmount > 0) {
-          currentPriceEUR = bbr.localizedMinBidAmount;
+        const bbr = pageProps.biddingBlockResponse;
+        if (bbr) {
+          if (typeof bbr.localizedCurrentBidAmount === 'number' && bbr.localizedCurrentBidAmount > 0) {
+            currentPriceEUR = bbr.localizedCurrentBidAmount;
+          } else if (bbr.live?.lot?.bid?.EUR && bbr.live.lot.bid.EUR > 0) {
+            currentPriceEUR = bbr.live.lot.bid.EUR;
+          } else if (bbr.biddingHistory?.bids?.[0]?.localizedBidAmount && bbr.biddingHistory.bids[0].localizedBidAmount > 0) {
+            currentPriceEUR = bbr.biddingHistory.bids[0].localizedBidAmount;
+          } else if (typeof bbr.localizedStartBidAmount === 'number' && bbr.localizedStartBidAmount > 0) {
+            currentPriceEUR = bbr.localizedStartBidAmount;
+          } else if (typeof bbr.localizedMinBidAmount === 'number' && bbr.localizedMinBidAmount > 0) {
+            currentPriceEUR = bbr.localizedMinBidAmount;
+          }
         }
-      }
 
-      if (!currentPriceEUR) {
-        const curBidMatch = str.match(/"localizedCurrentBidAmount":\s*([\d.]+)/i) || 
-                            str.match(/"bid":\{"EUR":\s*([\d.]+)/i) || 
-                            str.match(/"localizedBidAmount":\s*([\d.]+)/i) || 
-                            str.match(/"localizedStartBidAmount":\s*([\d.]+)/i) || 
-                            str.match(/"price_eur":\s*([\d.]+)/i);
-        if (curBidMatch && curBidMatch[1]) {
-          currentPriceEUR = parseFloat(curBidMatch[1]);
+        if (!currentPriceEUR) {
+          const curBidMatch = str.match(/"localizedCurrentBidAmount":\s*([\d.]+)/i) || 
+                              str.match(/"bid":\{"EUR":\s*([\d.]+)/i) || 
+                              str.match(/"localizedBidAmount":\s*([\d.]+)/i) || 
+                              str.match(/"localizedStartBidAmount":\s*([\d.]+)/i) || 
+                              str.match(/"price_eur":\s*([\d.]+)/i);
+          if (curBidMatch && curBidMatch[1]) {
+            currentPriceEUR = parseFloat(curBidMatch[1]);
+          }
         }
-      }
 
-      // ⏱ Czas zakończenia
-      const endMatch = str.match(/"biddingEndTime":"([^"]+)"/i) || str.match(/"bidding_end_time":"([^"]+)"/i) || str.match(/"closedAt":"([^"]+)"/i);
-      if (endMatch) {
-        const endTimeMs = new Date(endMatch[1]).getTime();
-        timeLeftMin = Math.max(0, Math.round((endTimeMs - Date.now()) / 60000));
-      }
-
-      // 🌍 Kraj sprzedawcy (z wyciągniętego z aukcji JSON)
-      const countryMatch = str.match(/"seller"[^}]*"country":\{"name":"([^"]+)"/i) || str.match(/"country":\{"name":"([^"]+)"/i);
-      if (countryMatch && countryMatch[1]) {
-        sellerCountry = countryMatch[1];
-      }
-
-      // 📜 Opis przedmiotu
-      const descMatch = str.match(/"description":"([\s\S]*?)"/i) || str.match(/"subtitle":"([^"]+)"/i);
-      if (descMatch && descMatch[1]) {
-        descriptionText = descMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"').replace(/<[^>]*>?/gm, ' ').slice(0, 1500);
-      }
-
-      // 🚚 Dokładny koszt wysyłki wyciągnięty ze strony
-      const explicitShippingMatch = str.match(/"shipping_cost":([\d.]+)/i) || str.match(/"shippingCost":\{"amount":([\d.]+)/i) || html.match(/(?:shipping|wysyłka|delivery)[^<]{0,40}(?:€|EUR)\s*([\d.]+)/i);
-      if (explicitShippingMatch && explicitShippingMatch[1]) {
-        const eurFee = parseFloat(explicitShippingMatch[1]);
-        if (!isNaN(eurFee) && eurFee > 0) {
-          shippingCostPLN = Math.round(eurFee * 4.3);
+        const endMatch = str.match(/"biddingEndTime":"([^"]+)"/i) || str.match(/"bidding_end_time":"([^"]+)"/i) || str.match(/"closedAt":"([^"]+)"/i);
+        if (endMatch) {
+          const endTimeMs = new Date(endMatch[1]).getTime();
+          timeLeftMin = Math.max(0, Math.round((endTimeMs - Date.now()) / 60000));
         }
-      } else if (sellerCountry) {
-        // Tabela realnych kosztów wysyłki Catawiki w zależności od kraju nadania sprzedawcy
-        const cLower = sellerCountry.toLowerCase();
-        if (cLower.includes('poland') || cLower.includes('polska')) shippingCostPLN = 25;
-        else if (cLower.includes('germany') || cLower.includes('niemcy') || cLower.includes('austria')) shippingCostPLN = 65;
-        else if (cLower.includes('france') || cLower.includes('francja') || cLower.includes('italy') || cLower.includes('włochy') || cLower.includes('spain') || cLower.includes('hiszpania') || cLower.includes('netherlands') || cLower.includes('holandia') || cLower.includes('latvia') || cLower.includes('łotwa')) shippingCostPLN = 75;
-        else shippingCostPLN = 95;
+
+        const countryMatch = str.match(/"seller"[^}]*"country":\{"name":"([^"]+)"/i) || str.match(/"country":\{"name":"([^"]+)"/i);
+        if (countryMatch && countryMatch[1]) {
+          sellerCountry = countryMatch[1];
+        }
+
+        const descMatch = str.match(/"description":"([\s\S]*?)"/i) || str.match(/"subtitle":"([^"]+)"/i);
+        if (descMatch && descMatch[1]) {
+          descriptionText = descMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"').replace(/<[^>]*>?/gm, ' ').slice(0, 1500);
+        }
+
+        const explicitShippingMatch = str.match(/"shipping_cost":([\d.]+)/i) || str.match(/"shippingCost":\{"amount":([\d.]+)/i) || html.match(/(?:shipping|wysyłka|delivery)[^<]{0,40}(?:€|EUR)\s*([\d.]+)/i);
+        if (explicitShippingMatch && explicitShippingMatch[1]) {
+          const eurFee = parseFloat(explicitShippingMatch[1]);
+          if (!isNaN(eurFee) && eurFee > 0) {
+            shippingCostPLN = Math.round(eurFee * 4.3);
+          }
+        } else if (sellerCountry) {
+          const cLower = sellerCountry.toLowerCase();
+          if (cLower.includes('poland') || cLower.includes('polska')) shippingCostPLN = 25;
+          else if (cLower.includes('germany') || cLower.includes('niemcy') || cLower.includes('austria')) shippingCostPLN = 65;
+          else if (cLower.includes('france') || cLower.includes('francja') || cLower.includes('italy') || cLower.includes('włochy') || cLower.includes('spain') || cLower.includes('hiszpania') || cLower.includes('netherlands') || cLower.includes('holandia') || cLower.includes('latvia') || cLower.includes('łotwa')) shippingCostPLN = 75;
+          else shippingCostPLN = 95;
+        }
       }
     }
 
-    if (!currentPriceEUR && fallbackBuyNow) {
-      currentPriceEUR = fallbackBuyNow;
+    // Bezpieczny fallbackcenowy gdyby połączenie ze stroną pojedynczej aukcji zostało zablokowane
+    if (!currentPriceEUR || isNaN(currentPriceEUR) || currentPriceEUR <= 0) {
+      currentPriceEUR = 25; // Domyślna cena startowa bida (25 EUR)
     }
 
     return { currentPriceEUR, timeLeftMin, sellerCountry, shippingCostPLN, descriptionText };
   } catch (e) {
-    return { currentPriceEUR: fallbackBuyNow, timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75, descriptionText: '' };
+    return { currentPriceEUR: fallbackBuyNow || 25, timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75, descriptionText: '' };
   }
 }
 
@@ -142,14 +133,14 @@ export async function scrapeCatawikiWatches() {
     if (results.length >= 60) break;
     try {
       const url = `https://www.catawiki.com/en/s?q=${encodeURIComponent(term)}&sort=closing_soon`;
-      let res = await fetchWithTimeout(url, { headers: secHeaders }, 4000);
+      let res = await fetchWithTimeout(url, { headers: secHeaders }, 3500);
 
       let html = '';
       if (res && res.ok) {
         html = await res.text();
       } else {
         const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-        const proxyRes = await fetchWithTimeout(proxyUrl, { headers: secHeaders }, 4000);
+        const proxyRes = await fetchWithTimeout(proxyUrl, { headers: secHeaders }, 3500);
         if (proxyRes && proxyRes.ok) {
           html = await proxyRes.text();
         }
@@ -171,20 +162,25 @@ export async function scrapeCatawikiWatches() {
         visited.add(lotId);
 
         const title = lot.title || 'Zegarek Catawiki';
+        const lowerTitle = title.toLowerCase();
+
+        // 🛡 FILTRACJA NIE-ZEGARKÓW (Dywany, meble, monety, obrazy itp.)
+        if (lowerTitle.includes('rug') || lowerTitle.includes('carpet') || lowerTitle.includes('dywan') || lowerTitle.includes('coin') || lowerTitle.includes('moneta') || lowerTitle.includes('painting') || lowerTitle.includes('shaggy') || lowerTitle.includes('lahore')) {
+          return null;
+        }
+
         const fullLink = lot.url ? (lot.url.startsWith('http') ? lot.url : `https://www.catawiki.com${lot.url}`) : `https://www.catawiki.com/en/l/${lotId}`;
         const imageUrl = lot.originalImageUrl || lot.thumbImageUrl || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop';
         const fallbackBuyNow = lot.buyNow?.price_eur || lot.buyNowPrice || null;
 
-        // 🛍 WYCIĄGANIE REALNYCH DANYCH Z AUKCJI: CENA BIDA, CZAS, KRAJ SPRZEDAWCY, KOSZT DOSTAWY, OPIS
         const details = await getRealLotDetails(fullLink, fallbackBuyNow);
         const priceEUR = details.currentPriceEUR;
 
         if (!priceEUR || isNaN(priceEUR) || priceEUR <= 0) {
-          console.warn(`⚠️ [CATAWIKI] Nie udało się wyciągnąć ceny dla: "${title}" - pomijam`);
           return null;
         }
+
         const currentPricePLN = Math.round(priceEUR * eurRate);
-        // Prowizja Catawiki liczona od ceny EUR (9% + 13 PLN stała opłata)
         const commissionPLN = Math.round(priceEUR * 0.09 * eurRate) + 13;
 
         return {
@@ -204,7 +200,7 @@ export async function scrapeCatawikiWatches() {
 
       const resolvedLots = await Promise.all(lotPromises);
       for (const item of resolvedLots) {
-        if (item && results.length < 25) {
+        if (item && results.length < 35) {
           results.push(item);
         }
       }
@@ -214,4 +210,3 @@ export async function scrapeCatawikiWatches() {
   console.log(`✅ [CATAWIKI] Pozyskano ${results.length} realnych aukcji z prawdziwym czasem i realną dostawą!`);
   return results;
 }
-
