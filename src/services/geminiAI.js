@@ -21,15 +21,18 @@ if (apiKey && apiKey !== 'AQ.Ab8RN6JqyM...') {
  * @param {string} [imageUrl] - URL oryginalnego zdjęcia aukcyjnego
  * @returns {Promise<{marka: string, model: string, nr_referencyjny: string|null, aiEstimatedPrice: number|null, stan: string, full_set: boolean, papiery: boolean, pudelko: boolean, sprawny: boolean, uwagi_ai: string}>}
  */
-export async function analyzeWatchOffer(title, description, imageUrl = null) {
-  const combinedText = `Tytuł: ${title}\nOpis: ${description || ''}`;
+export async function analyzeWatchOffer(title, description, imageUrl = null, extraInfo = {}) {
+  const countryText = extraInfo.sellerCountry ? `\nKraj wysyłki sprzedawcy ze strony: ${extraInfo.sellerCountry}` : '';
+  const shippingText = extraInfo.shippingCost ? `\nRealny koszt dostawy ze strony: ${extraInfo.shippingCost} PLN` : '';
+  const combinedText = `Tytuł: ${title}\nOpis: ${description || ''}${countryText}${shippingText}`;
 
   if (genAI) {
     try {
-      const prompt = `Jesteś bezwzględnym, doświadczonym rzeczoznawcą i fliperem zegarków (budżet 100 PLN - 3000 PLN). Twój cel to podanie SUCHEJ, REALNEJ WARTOŚCI RYNKOWEJ (Chrono24, Allegro, eBay), aby użytkownik NIE PRZEPŁACIŁ ani grosza.
+      const prompt = `Jesteś bezwzględnym, doświadczonym rzeczoznawcą i fliperem zegarków w Polsce (budżet 100 PLN - 3000 PLN). Twój cel to podanie SUCHEJ, REALNEJ WARTOŚCI RYNKOWEJ W POLSCE (ze szczególnym uwzględnieniem realiów POLSKIEGO RYNKU WTÓRNEGO: Allegro, Chrono24 Polska, OLX), aby użytkownik NIE PRZEPŁACIŁ ani grosza i mógł zyskowo odprzedać zegarek w Polsce.
 
-ZASADA ŁĄCZONEJ WYCENY REALNEJ (STAN WIZUALNO-MECHANICZNY + KOMPLETACJA):
-Musisz połączyć stan wizualny/mechaniczny Z KOMPLETEM w jedną spójną cenę rynkową.
+ZASADA BEZWZGLĘDNEJ WYCENY POD POLSKI RYNEK (STAN + KOMPLETACJA):
+Wyceniaj zegarek biorąc pod uwagę specyfikę i popyt na POLSKIM RYNKU (PLN). Zegarki Seiko, Tissot, Orient, Casio, Citizen czy vintage Omegi mają na polskim rynku sprecyzowane realia cenowe.
+Musisz połączyć stan wizualny/mechaniczny Z KOMPLETEM w jedną spójną polską cenę rynkową.
 Przykłady kombinacji:
 - Zegarek używany/porysowany + Full Set z certyfikatem => Szacujesz cenę rynkową dokładnie dla używanego egzemplarza w zestawie z Full Setem.
 - Zegarek niesprawny/do serwisu + z pudełkiem/papierami => Szacujesz cenę rynkową uszkodzonego zegarka z tym kompletem.

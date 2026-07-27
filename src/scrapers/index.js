@@ -53,8 +53,11 @@ export async function runScraperJob(forceAll = false) {
       console.log(`\n--------------------------------------------------`);
       console.log(`🤖 Analiza AI (Gemini 1.5 Flash) dla realnej oferty: "${rawOffer.title}"...`);
 
-      // 3. Analiza AI kombinacji stanu i wyposażenia
-      const aiData = await analyzeWatchOffer(rawOffer.title, rawOffer.rawDescription, rawOffer.imageUrl);
+      // 3. Analiza AI kombinacji stanu, wyposażenia oraz wyciągniętej ze strony dostawy
+      const aiData = await analyzeWatchOffer(rawOffer.title, rawOffer.rawDescription, rawOffer.imageUrl, {
+        sellerCountry: rawOffer.sellerCountry,
+        shippingCost: rawOffer.shippingCost
+      });
       console.log(`📋 Wynik Gemini: ${aiData.marka} ${aiData.model} | Ref: ${aiData.nr_referencyjny || 'Brak'} | Stan: ${aiData.stan} | FullSet: ${aiData.full_set} | Sprawny: ${aiData.sprawny}`);
 
       // 4. Moduł wyceny rynkowej
@@ -64,8 +67,8 @@ export async function runScraperJob(forceAll = false) {
       const evaluation = evaluateBuyingDecision({
         currentPrice: rawOffer.currentPrice,
         marketAvgPrice: marketPrice.marketAvgPrice,
-        shippingCost: rawOffer.shippingCost,
-        commission: 0,
+        shippingCost: rawOffer.shippingCost || (rawOffer.platform === 'Catawiki' ? 75 : 15),
+        commission: rawOffer.commission || (rawOffer.platform === 'Catawiki' ? Math.round(rawOffer.currentPrice * 0.09) + 13 : 0),
         timeLeftMin: rawOffer.timeLeftMin,
         marginFactor: parseFloat(process.env.DEFAULT_MARGIN_FACTOR) || 0.7,
         sprawny: aiData.sprawny

@@ -176,7 +176,12 @@ export async function sendWatchAlert(offer) {
   const sprawnyBadge = offer.sprawny ? 'TAK ✅ (Działa)' : 'WYMAGA REPARACJI ⚠️';
   const formattedTimeLeft = formatTimeLeft(offer.timeLeftMin);
 
-  const caption = `🔥 *OKAZJA ZEUGARKA (Budżet 100 - 3000 PLN)* 🔥
+  const originText = offer.sellerCountry ? `${offer.sellerCountry} (${offer.platform})` : (offer.platform === 'Catawiki' ? 'Unia Europejska (Catawiki EU)' : 'Polska (Allegro.pl)');
+  const commissionVal = offer.commission !== undefined ? offer.commission : (offer.platform === 'Catawiki' ? Math.round(offer.currentPrice * 0.09) + 13 : 0);
+  const totalCost = offer.currentPrice + offer.shippingCost + commissionVal;
+  const netProfit = (offer.marketAvgPrice - totalCost).toFixed(2);
+
+  const caption = `🔥 *OKAZJA ZEGAREK (Budżet 100 - 3000 PLN)* 🔥
 
 ⌚ *${offer.marka} ${offer.model}*
 🔢 Ref: \`${offer.nr_referencyjny || 'Rozpoznano po wyglądzie'}\`
@@ -187,13 +192,18 @@ export async function sendWatchAlert(offer) {
 📦 Full Set: ${fullSetBadge}
 📄 Dokumenty/Gwarancja: ${papieryBadge}
 🏷️ Pudełko: ${pudelkoBadge}
+📍 *Dostawa z*: *${originText}*
 📝 *Uwagi AI*: _${offer.uwagi_ai || 'Ścisła analiza kombinacji stanu i kompletu'}_
 
-💰 *FINANSE:*
-💵 Aktualna cena: *${offer.currentPrice} PLN*
-📊 Średnia rynkowa: *${offer.marketAvgPrice} PLN*
+💰 *FINANSE & KOSTZTY DOSTAWY:*
+💵 Cena wywoławcza/licytowana: *${offer.currentPrice} PLN*
+🚚 Koszt dostawy: *${offer.shippingCost} PLN*
+🏛 Opłata kupującego: *${commissionVal} PLN*
+🧾 *Łączny koszt na czysto*: *${totalCost} PLN*
+
+📊 Wartość rynkowa (Polska): *${offer.marketAvgPrice} PLN*
 🎯 Max Twoja oferta: *${offer.maxOffer} PLN*
-📈 *Przewidywany zysk*: *+${(offer.marketAvgPrice - offer.currentPrice).toFixed(2)} PLN*
+📈 *Czysty Zysk Netto*: *+${netProfit} PLN*
 ⏱ Czas do końca: *${formattedTimeLeft}*
 
 🔗 [Zobacz oryginalną aukcję](${offer.link})`;
