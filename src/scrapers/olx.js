@@ -10,7 +10,7 @@ export async function scrapeOlxWatches() {
   const visited = new Set();
 
   try {
-    const searchQueries = ['zegarek', 'seiko', 'tissot', 'orient', 'casio', 'omega', 'citizen'];
+    const searchQueries = ['zegarek męski', 'zegarek seiko', 'zegarek tissot', 'zegarek orient', 'zegarek casio g-shock', 'zegarek omega', 'zegarek citizen', 'zegarek hamilton', 'zegarek certina', 'zegarek longines'];
 
     await Promise.all(searchQueries.map(async (query) => {
       if (results.length >= 60) return;
@@ -37,6 +37,14 @@ export async function scrapeOlxWatches() {
             visited.add(id);
 
             const title = item.title || 'Zegarek OLX';
+            const lowerTitle = title.toLowerCase();
+            if (lowerTitle.includes('keyboard') || lowerTitle.includes('pianino') || lowerTitle.includes('fortepian') || lowerTitle.includes('syntezator') || lowerTitle.includes('gitar') || lowerTitle.includes('kalkulator')) {
+              continue; // Pomijaj instrumenty muzyczne Casio
+            }
+            // Filtr smartwatchów, budzików, zegarów ściennych i nie-zegarków
+            if (lowerTitle.includes('smartwatch') || lowerTitle.includes('smart watch') || lowerTitle.includes('apple watch') || lowerTitle.includes('galaxy watch') || lowerTitle.includes('garmin') || lowerTitle.includes('fitbit') || lowerTitle.includes('huawei watch') || lowerTitle.includes('xiaomi') || lowerTitle.includes('opaska') || lowerTitle.includes('budzik') || lowerTitle.includes('ścienny') || lowerTitle.includes('kieszonkowy') || lowerTitle.includes('stojak') || lowerTitle.includes('nakręcarka')) {
+              continue; // Pomijaj smartwatche, budziki, zegarki ścienne
+            }
             const priceParam = item.params?.find(p => p.key === 'price');
             const priceVal = priceParam?.value?.value || item.price?.value;
             if (!priceVal || isNaN(priceVal)) continue;
@@ -44,6 +52,9 @@ export async function scrapeOlxWatches() {
             const city = item.location?.city?.name || 'Polska';
             const link = item.url || `https://www.olx.pl/d/oferta/${id}`;
             const photo = item.photos?.[0]?.link ? item.photos[0].link.replace('{width}', '1000').replace('{height}', '750') : 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=600&auto=format&fit=crop';
+
+            const cleanDesc = (item.description || '').replace(/<[^>]*>?/gm, ' ').trim();
+            const paramsText = item.params ? item.params.map(p => `${p.name || p.key}: ${p.value?.label || p.value?.value || ''}`).join('; ') : '';
 
             results.push({
               id: `olx_${id}`,
@@ -55,7 +66,7 @@ export async function scrapeOlxWatches() {
               imageUrl: photo,
               link: link,
               platform: 'OLX',
-              rawDescription: `${title} ${item.description || ''} [Lokalizacja: ${city}]`
+              rawDescription: `Tytuł: ${title}\nOpis: ${cleanDesc}\nParametry: ${paramsText}\nLokalizacja: ${city}`
             });
           }
         }

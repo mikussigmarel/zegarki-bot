@@ -49,11 +49,18 @@ export async function scrapeAllegroWatches() {
   const visited = new Set();
 
   try {
-    const searchTerms = ['zegarek', 'seiko', 'tissot', 'orient', 'omega', 'citizen'];
+    // Dwie rundy: AUKCJE (kończące się najwcześniej) + KUP TERAZ (najtańsze)
+    const searchTerms = ['zegarek', 'seiko', 'tissot', 'orient', 'omega', 'citizen', 'casio g-shock', 'hamilton', 'certina'];
+    const searchUrls = [];
+    for (const term of searchTerms) {
+      // Aukcje kończące się najszybciej
+      searchUrls.push(`https://allegro.pl/listing?string=${encodeURIComponent(term)}&offerType=auction&order=qd`);
+      // Kup Teraz – najtańsze
+      searchUrls.push(`https://allegro.pl/listing?string=${encodeURIComponent(term)}&offerType=buyNow&order=p`);
+    }
 
-    await Promise.all(searchTerms.map(async (term) => {
-      if (results.length >= 40) return;
-      const url = `https://allegro.pl/listing?string=${encodeURIComponent(term)}&offerType=auction&order=qd`;
+    await Promise.all(searchUrls.map(async (url) => {
+      if (results.length >= 60) return;
       const html = await fetchAllegroHtmlWithProxy(url);
       if (!html) return;
 
@@ -79,7 +86,7 @@ export async function scrapeAllegroWatches() {
           }
 
           for (const item of allItems) {
-            if (results.length >= 40) break;
+            if (results.length >= 60) break;
             const itemId = String(item.id || item.url || Math.random());
             if (visited.has(itemId)) continue;
             visited.add(itemId);
@@ -101,10 +108,17 @@ export async function scrapeAllegroWatches() {
             }
 
             const isAuction = item.isAuction || item.offerType === 'auction' || item.auctionInfo !== undefined || (item.url && item.url.includes('aukcja'));
-            if (!isAuction && timeLeftMin > 300) continue;
+            // Kup Teraz nie ma timeLeftMin – ustawiamy 0 (zawsze dostępne)
+            if (!isAuction) {
+              timeLeftMin = 0; // Kup Teraz = bez limitu czasu
+            }
+            if (isAuction && timeLeftMin > 300) continue;
 
             const fullLink = item.url ? (item.url.startsWith('http') ? item.url : `https://allegro.pl${item.url}`) : `https://allegro.pl/oferta/${itemId}`;
             const imgUrl = item.images?.[0]?.url || item.primaryImage?.url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop';
+
+            const subtitleText = item.subtitle?.text || item.subtitle || '';
+            const paramsText = Array.isArray(item.parameters) ? item.parameters.map(p => `${p.name || ''}: ${(p.values || []).join(', ')}`).join('; ') : '';
 
             results.push({
               id: `allegro_${itemId}`,
@@ -116,7 +130,7 @@ export async function scrapeAllegroWatches() {
               imageUrl: imgUrl,
               link: fullLink,
               platform: 'Allegro',
-              rawDescription: `${title} [Allegro Licytacja] Czas: ${timeLeftMin} min`
+              rawDescription: `Tytuł: ${title}\nPodtytuł: ${subtitleText}\nParametry Allegro: ${paramsText}\nCzas do końca: ${timeLeftMin} min`
             });
           }
         } catch (e) {}

@@ -1,4 +1,5 @@
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
+import { getEurPlnRate } from '../services/currencyRate.js';
 
 const secHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -37,12 +38,13 @@ async function getRealLotDetails(lotUrl) {
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(lotUrl)}`;
       res = await fetchWithTimeout(proxyUrl, { headers: secHeaders }, 3500);
     }
-    if (!res || !res.ok) return { timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75 };
+    if (!res || !res.ok) return { timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75, descriptionText: '' };
     const html = await res.text();
 
     let timeLeftMin = null;
     let sellerCountry = 'Unia Europejska';
     let shippingCostPLN = 75;
+    let descriptionText = '';
 
     const jsonMatch = html.match(/<script\s+id="__NEXT_DATA__"\s+type="application\/json"\s*>([\s\S]*?)<\/script>/i);
     if (jsonMatch) {
@@ -62,6 +64,12 @@ async function getRealLotDetails(lotUrl) {
         sellerCountry = countryMatch[1];
       }
 
+      // 📜 Opis przedmiotu
+      const descMatch = str.match(/"description":"([\s\S]*?)"/i) || str.match(/"subtitle":"([^"]+)"/i);
+      if (descMatch && descMatch[1]) {
+        descriptionText = descMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"').replace(/<[^>]*>?/gm, ' ').slice(0, 1500);
+      }
+
       // 🚚 Dokładny koszt wysyłki wyciągnięty ze strony
       const explicitShippingMatch = str.match(/"shipping_cost":([\d.]+)/i) || str.match(/"shippingCost":\{"amount":([\d.]+)/i) || html.match(/(?:shipping|wysyłka|delivery)[^<]{0,40}(?:€|EUR)\s*([\d.]+)/i);
       if (explicitShippingMatch && explicitShippingMatch[1]) {
@@ -79,9 +87,9 @@ async function getRealLotDetails(lotUrl) {
       }
     }
 
-    return { timeLeftMin, sellerCountry, shippingCostPLN };
+    return { timeLeftMin, sellerCountry, shippingCostPLN, descriptionText };
   } catch (e) {
-    return { timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75 };
+    return { timeLeftMin: null, sellerCountry: 'Unia Europejska', shippingCostPLN: 75, descriptionText: '' };
   }
 }
 
@@ -90,10 +98,11 @@ async function getRealLotDetails(lotUrl) {
  */
 export async function scrapeCatawikiWatches() {
   console.log('🔍 [CATAWIKI SCRAPER] Skanowanie realnych aukcji na żywo z Catawiki...');
+  const eurRate = await getEurPlnRate();
   const results = [];
   const visited = new Set();
 
-  const searchTerms = ['watch', 'zegarek', 'seiko', 'omega', 'tissot'];
+  const searchTerms = ['wristwatch', 'zegarek', 'seiko', 'omega', 'tissot', 'orient', 'citizen', 'hamilton'];
 
   for (const term of searchTerms) {
     if (results.length >= 60) break;
@@ -131,24 +140,36 @@ export async function scrapeCatawikiWatches() {
         const fullLink = lot.url ? (lot.url.startsWith('http') ? lot.url : `https://www.catawiki.com${lot.url}`) : `https://www.catawiki.com/en/l/${lotId}`;
         const imageUrl = lot.originalImageUrl || lot.thumbImageUrl || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop';
 
-        const buyNowPrice = lot.buyNow?.price_eur;
-        const priceEUR = buyNowPrice || 85;
-        const currentPricePLN = Math.round(priceEUR * 4.3);
+        // Wyciągnij REALNĄ cenę: aktualna licytacja > kup teraz > cena startowa
+        const currentBid = lot.currentBidAmount || lot.currentBid?.amount || lot.currentBid?.price_eur || lot.currentBid;
+        const startPrice = lot.startPrice || lot.minimumBid || lot.openingBid;
+        const buyNowPrice = lot.buyNow?.price_eur || lot.buyNowPrice;
+        const lotPrice = lot.price || lot.currentPrice;
+        const priceEUR = parseFloat(currentBid) || parseFloat(lotPrice) || parseFloat(buyNowPrice) || parseFloat(startPrice) || null;
+        
+        if (!priceEUR || isNaN(priceEUR) || priceEUR <= 0) {
+          console.warn(`⚠️ [CATAWIKI] Nie udało się wyciągnąć ceny dla: "${title}" - pomijam`);
+          return null;
+        }
+        const currentPricePLN = Math.round(priceEUR * eurRate);
+        // Prowizja Catawiki liczona od ceny EUR (9% + 13 PLN stała opłata)
+        const commissionPLN = Math.round(priceEUR * 0.09 * eurRate) + 13;
 
-        // 🛍 WYCIĄGANIE REALNYCH DANYCH Z AUKCJI: CZAS, KRAJ SPRZEDAWCY, KOSZT DOSTAWY
+        // 🛍 WYCIĄGANIE REALNYCH DANYCH Z AUKCJI: CZAS, KRAJ SPRZEDAWCY, KOSZT DOSTAWY, OPIS
         const details = await getRealLotDetails(fullLink);
 
         return {
           id: `cw_live_${lotId}`,
           title: title,
           currentPrice: currentPricePLN,
+          commission: commissionPLN,
           shippingCost: details.shippingCostPLN,
           sellerCountry: details.sellerCountry,
-          timeLeftMin: details.timeLeftMin !== null ? details.timeLeftMin : 99999,
+          timeLeftMin: details.timeLeftMin !== null ? details.timeLeftMin : 180,
           imageUrl: imageUrl,
           link: fullLink,
           platform: 'Catawiki',
-          rawDescription: `${title} ${lot.subtitle || ''} [Kraj sprzedawcy: ${details.sellerCountry}] [Dostawa: ${details.shippingCostPLN} PLN]`
+          rawDescription: `Tytuł: ${title}\nPodtytuł: ${lot.subtitle || ''}\nOpis ze strony: ${details.descriptionText || ''}\n[Kraj sprzedawcy: ${details.sellerCountry}] [Dostawa: ${details.shippingCostPLN} PLN]`
         };
       });
 

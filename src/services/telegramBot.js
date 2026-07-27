@@ -173,7 +173,9 @@ export async function sendWatchAlert(offer) {
   const fullSetBadge = offer.full_set ? 'TAK 📦 (Komplet)' : 'NIE ❌';
   const papieryBadge = offer.papiery ? 'TAK 📄' : 'BRAK ❌';
   const pudelkoBadge = offer.pudelko ? 'TAK 📦' : 'BRAK ❌';
-  const sprawnyBadge = offer.sprawny ? 'TAK ✅ (Działa)' : 'WYMAGA REPARACJI ⚠️';
+  const sprawnyBadge = offer.sprawny ? 'TAK ✅ (100% Sprawny na chodzie)' : 'WYMAGA REPARACJI ⚠️';
+  const eraBadge = offer.rok_produkcji_lub_era || 'Nieokreślony';
+  const mechanismBadge = offer.rodzaj_mechanizmu || 'Nieokreślony';
   const formattedTimeLeft = formatTimeLeft(offer.timeLeftMin);
 
   const originText = offer.sellerCountry ? `${offer.sellerCountry} (${offer.platform})` : (offer.platform === 'Catawiki' ? 'Unia Europejska (Catawiki EU)' : 'Polska (Allegro.pl)');
@@ -185,6 +187,7 @@ export async function sendWatchAlert(offer) {
 
 ⌚ *${offer.marka} ${offer.model}*
 🔢 Ref: \`${offer.nr_referencyjny || 'Rozpoznano po wyglądzie'}\`
+📅 Rok / Era: *${eraBadge}* | 🔋 Mechanizm: *${mechanismBadge}*
 ✨ Stan: *${offer.stan}* | 🏛 Platforma: *${offer.platform}*
 
 📋 *SZCZEGÓŁY WERYFIKACJI:*
@@ -195,13 +198,14 @@ export async function sendWatchAlert(offer) {
 📍 *Dostawa z*: *${originText}*
 📝 *Uwagi AI*: _${offer.uwagi_ai || 'Ścisła analiza kombinacji stanu i kompletu'}_
 
-💰 *FINANSE & KOSTZTY DOSTAWY:*
+💰 *FINANSE & KOSZTY DOSTAWY:*
 💵 Cena wywoławcza/licytowana: *${offer.currentPrice} PLN*
 🚚 Koszt dostawy: *${offer.shippingCost} PLN*
 🏛 Opłata kupującego: *${commissionVal} PLN*
 🧾 *Łączny koszt na czysto*: *${totalCost} PLN*
 
 📊 Wartość rynkowa (Polska): *${offer.marketAvgPrice} PLN*
+📌 Źródło wyceny: _${offer.priceSource || 'Portale OLX/Allegro/Chrono24'}_
 🎯 Max Twoja oferta: *${offer.maxOffer} PLN*
 📈 *Czysty Zysk Netto*: *+${netProfit} PLN*
 ⏱ Czas do końca: *${formattedTimeLeft}*
