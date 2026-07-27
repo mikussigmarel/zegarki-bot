@@ -190,6 +190,10 @@ export async function sendWatchAlert(offer) {
     platformBadge = '🔵 *[OLX]* (Niebieskie)';
   }
 
+  const searchRefOrModel = (offer.nr_referencyjny || offer.model || '').replace(/[^a-zA-Z0-9\s-]/g, '').trim();
+  const searchWord = `${offer.marka} ${searchRefOrModel}`.trim();
+  const encodedSearch = encodeURIComponent(searchWord);
+
   const caption = `${platformBadge} 🔥 *OKAZJA ZEGAREK (Budżet 100 - 3000 PLN)* 🔥
 
 ⌚ *${offer.marka} ${offer.model}*
@@ -211,8 +215,15 @@ export async function sendWatchAlert(offer) {
 🏛 Opłata kupującego: *${commissionVal} PLN*
 🧾 *Łączny koszt na czysto*: *${totalCost} PLN*
 
-📊 Wartość rynkowa (Polska): *${offer.marketAvgPrice} PLN*
-📌 Źródło wyceny: _${offer.priceSource || 'Portale OLX/Allegro/Chrono24'}_
+📊 *WARTOŚĆ RYNKOWA & PORÓWNANIA CEN:*
+🇵🇱 Średnia cena rynkowa: *${offer.marketAvgPrice} PLN*
+📌 Źródło: _${offer.priceSource || 'Portale OLX/Allegro/Chrono24'}_
+🔗 *Sprawdź oferty porównawcze:*
+ • [🔎 Szukaj na Allegro](https://allegro.pl/listing?string=${encodedSearch})
+ • [🔎 Szukaj na OLX](https://www.olx.pl/oferty/q-${encodedSearch}/)
+ • [🔎 Szukaj na Chrono24](https://www.chrono24.pl/search/index.htm?query=${encodedSearch})
+ • [🔎 Szukaj w Google](https://www.google.com/search?q=${encodedSearch}%20cena%20PLN)
+
 🎯 Max Twoja oferta: *${offer.maxOffer} PLN*
 📈 *Czysty Zysk Netto*: *+${netProfit} PLN*
 ⏱ Czas do końca: *${formattedTimeLeft}*

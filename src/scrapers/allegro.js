@@ -54,7 +54,7 @@ export async function scrapeAllegroWatches() {
     if (results.length >= 60) break;
     try {
       const url = `https://allegrolokalnie.pl/oferty/q/${encodeURIComponent(query)}?sort=ending`;
-      const res = await fetch(url, { headers: secHeaders, signal: AbortSignal.timeout(3000) });
+      const res = await fetch(url, { headers: secHeaders, signal: AbortSignal.timeout(6000) });
       if (!res.ok) continue;
 
       const html = await res.text();

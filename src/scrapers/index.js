@@ -43,7 +43,7 @@ export async function runScraperJob(forceAll = false) {
 
       // 3. Tekstowy pre-filter niesprawności
       const preCheck = checkTextIsWorkingStatus(rawOffer.rawDescription || rawOffer.title);
-      if (!preCheck.isWorking) return false;
+      if (preCheck.isDefinitelyNotWorking) return false;
 
       // 4. Historia przetworzonych
       if (processedOffersHistory.has(rawOffer.id) && !forceAll) return false;
