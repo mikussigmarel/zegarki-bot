@@ -23,6 +23,7 @@ if (apiKey && apiKey !== 'AQ.Ab8RN6JqyM...') {
  */
 export async function analyzeWatchOffer(title, description, imageUrl = null, extraInfo = {}) {
   const countryText = extraInfo.sellerCountry ? `\nKraj wysyłki sprzedawcy ze strony: ${extraInfo.sellerCountry}` : '';
+  const shippingText = extraInfo.shippingCost ? `\nRealny koszt dostawy ze strony: ${extraInfo.shippingCost} PLN` : '';
   const combinedText = `Tytuł: ${title}\nOpis: ${description || ''}${countryText}${shippingText}`;
   // 🛡 PRE-FILTER ANTY-PODRÓBKA (Reguła słów kluczowych)
   const lowerText = combinedText.toLowerCase();
