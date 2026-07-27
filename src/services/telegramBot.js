@@ -138,7 +138,29 @@ Zaczynamy skanowanie na żywo! ⌚🔥`, { parse_mode: 'Markdown' });
 }
 
 /**
- * Wysyła szczegółowy alert na Telegram z dokładnymi informacjami flipowania.
+ * Formatowanie minut do czytelnej postaci po polsku (np. "1 d. 13 godz. 20 min" lub "45 min")
+ */
+function formatTimeLeft(timeLeftMin) {
+  if (!timeLeftMin || isNaN(timeLeftMin)) return 'Kilkanaście minut';
+  const totalMin = Math.round(timeLeftMin);
+  if (totalMin <= 0) return 'Zakończona';
+  
+  const days = Math.floor(totalMin / (24 * 60));
+  const remainingMinAfterDays = totalMin % (24 * 60);
+  const hours = Math.floor(remainingMinAfterDays / 60);
+  const mins = remainingMinAfterDays % 60;
+
+  if (days > 0) {
+    return `${days} d. ${hours} godz. ${mins} min`;
+  }
+  if (hours > 0) {
+    return `${hours} godz. ${mins} min`;
+  }
+  return `${mins} min`;
+}
+
+/**
+ * Wysyła szczegółowy alert na Telegram z dokładnymi informacjami.
  * @param {Object} offer - Obiekt oferty
  */
 export async function sendWatchAlert(offer) {
@@ -149,6 +171,7 @@ export async function sendWatchAlert(offer) {
   const papieryBadge = offer.papiery ? 'TAK 📄' : 'BRAK ❌';
   const pudelkoBadge = offer.pudelko ? 'TAK 📦' : 'BRAK ❌';
   const sprawnyBadge = offer.sprawny ? 'TAK ✅ (Działa)' : 'WYMAGA REPARACJI ⚠️';
+  const formattedTimeLeft = formatTimeLeft(offer.timeLeftMin);
 
   const caption = `🔥 *OKAZJA ZEUGARKA (Budżet 100 - 3000 PLN)* 🔥
 
@@ -161,14 +184,14 @@ export async function sendWatchAlert(offer) {
 📦 Full Set: ${fullSetBadge}
 📄 Dokumenty/Gwarancja: ${papieryBadge}
 🏷️ Pudełko: ${pudelkoBadge}
-📝 *Uwagi AI*: _${offer.uwagi_ai || 'Czysta tarcza i koperta'}_
+📝 *Uwagi AI*: _${offer.uwagi_ai || 'Ścisła analiza kombinacji stanu i kompletu'}_
 
 💰 *FINANSE:*
 💵 Aktualna cena: *${offer.currentPrice} PLN*
 📊 Średnia rynkowa: *${offer.marketAvgPrice} PLN*
 🎯 Max Twoja oferta: *${offer.maxOffer} PLN*
 📈 *Przewidywany zysk*: *+${(offer.marketAvgPrice - offer.currentPrice).toFixed(2)} PLN*
-⏱ Czas do końca: *${offer.timeLeftMin} min*
+⏱ Czas do końca: *${formattedTimeLeft}*
 
 🔗 [Zobacz oryginalną aukcję](${offer.link})`;
 
@@ -197,7 +220,7 @@ export async function sendWatchAlert(offer) {
           ...inlineKeyboard
         });
       }
-      console.log(`📱 [TELEGRAM] Wysłano oryginalne zdjęcie i alert dla ${offer.marka} ${offer.model}`);
+      console.log(`📱 [TELEGRAM] Wysłano alert dla ${offer.marka} ${offer.model} (Czas: ${formattedTimeLeft})`);
       return true;
     } catch (err) {
       console.error('⚠️ Błąd wysyłania wiadomości Telegram:', err.message);

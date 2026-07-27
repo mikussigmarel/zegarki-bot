@@ -1,37 +1,36 @@
 /**
- * Moduł wyceny rynkowej oraz matematyki decyzyjnej.
+ * Moduł wyceny rynkowej z rygorystycznym filtrem czasowym (Max 5 godzin do końca).
  */
 
 /**
- * Szacuje średnią cenę rynkową dla danego zegarka.
+ * Szacuje średnią cenę rynkową zegarka na podstawie wyceny Gemini.
  */
-export async function getMarketPriceEstimate(marka, model, nrReferencyjny = null, aiEstimatedPrice = null) {
-  let baseEstimate = aiEstimatedPrice || 2500;
+export async function getMarketPriceEstimate(marka, model, nrReferencyjny = null, aiData = {}) {
+  const { aiEstimatedPrice } = aiData;
+  let marketAvgPrice = aiEstimatedPrice || 2500;
 
-  const key = `${marka} ${model} ${nrReferencyjny || ''}`.toLowerCase();
+  const key = `${marka || ''} ${model || ''} ${nrReferencyjny || ''}`.toLowerCase();
 
-  if (key.includes('speedmaster') || key.includes('omega')) {
-    baseEstimate = 9500;
-  } else if (key.includes('rolex') || key.includes('submariner')) {
-    baseEstimate = 38000;
-  } else if (key.includes('seiko') || key.includes('speedtimer') || key.includes('pogue')) {
-    baseEstimate = 2600;
-  } else if (key.includes('tissot') || key.includes('prx')) {
-    baseEstimate = 2400;
-  } else if (key.includes('tag heuer') || key.includes('carrera')) {
-    baseEstimate = 6500;
-  } else if (aiEstimatedPrice && aiEstimatedPrice > 100) {
-    baseEstimate = aiEstimatedPrice;
+  if (!aiEstimatedPrice) {
+    if (key.includes('speedmaster') || key.includes('omega')) {
+      marketAvgPrice = 9500;
+    } else if (key.includes('rolex') || key.includes('submariner')) {
+      marketAvgPrice = 38000;
+    } else if (key.includes('seiko') || key.includes('speedtimer') || key.includes('pogue')) {
+      marketAvgPrice = 2600;
+    } else if (key.includes('tissot') || key.includes('prx')) {
+      marketAvgPrice = 2400;
+    } else if (key.includes('tag heuer') || key.includes('carrera')) {
+      marketAvgPrice = 6500;
+    }
   }
 
-  const chronoPrice = Math.round(baseEstimate * 1.05);
-  const allegroPrice = Math.round(baseEstimate * 0.95);
-  const ebayPrice = Math.round(baseEstimate * 1.00);
-
-  const marketAvgPrice = Math.round((chronoPrice + allegroPrice + ebayPrice) / 3);
+  const chronoPrice = Math.round(marketAvgPrice * 1.05);
+  const allegroPrice = Math.round(marketAvgPrice * 0.95);
+  const ebayPrice = Math.round(marketAvgPrice * 1.00);
 
   return {
-    marketAvgPrice,
+    marketAvgPrice: Math.round(marketAvgPrice),
     chronoPrice,
     allegroPrice,
     ebayPrice
@@ -39,7 +38,7 @@ export async function getMarketPriceEstimate(marka, model, nrReferencyjny = null
 }
 
 /**
- * Wylicza matematykę decyzyjną oraz sprawdza warunek zakupu (Okres czasu: do 5 GODZIN / 300 min).
+ * Wylicza matematykę decyzyjna zakupu (Ścisły rygor: MAX 5 GODZIN DO KOŃCA).
  */
 export function evaluateBuyingDecision({
   currentPrice,
@@ -47,16 +46,17 @@ export function evaluateBuyingDecision({
   shippingCost = 0,
   commission = 0,
   timeLeftMin,
-  marginFactor = 0.7
+  marginFactor = 0.7,
+  sprawny = true
 }) {
-  // Max_Oferta = (Średnia Rynkowa * 0.7) - Koszty_Wysyłki - Prowizje
   const maxOffer = Math.round((marketAvgPrice * marginFactor) - shippingCost - commission);
 
-  // Zwiększenie okna czasowego z 30 minut do 5 GODZIN (300 minut)
   const isCheapEnough = currentPrice < maxOffer;
-  const isEndingSoon = !timeLeftMin || timeLeftMin <= 300;
 
-  const shouldBuyAlert = isCheapEnough && isEndingSoon;
+  // STRICT REQUIREMENT: Zostalo <= 300 minut (5 godzin)
+  const isEndingSoon = timeLeftMin !== undefined && timeLeftMin !== null && timeLeftMin <= 300;
+
+  const shouldBuyAlert = isCheapEnough && isEndingSoon && (sprawny !== false || (marketAvgPrice - currentPrice) > 800);
   const profitMargin = Math.round(marketAvgPrice - currentPrice - shippingCost - commission);
 
   return {

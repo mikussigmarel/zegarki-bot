@@ -15,7 +15,7 @@ if (apiKey && apiKey !== 'AQ.Ab8RN6JqyM...') {
 }
 
 /**
- * Przeanalizuje opis oraz zdjęcie zegarka pod kątem kluczowych kryteriów flipowania (100 - 3000 PLN).
+ * Przeanalizuje opis oraz zdjęcie zegarka pod kątem ścisłej wyceny rynkowej kombinacji stanu wizualno-mechanicznego + kompletacji.
  * @param {string} title - Tytuł aukcji
  * @param {string} description - Opis aukcji
  * @param {string} [imageUrl] - URL oryginalnego zdjęcia aukcyjnego
@@ -26,22 +26,28 @@ export async function analyzeWatchOffer(title, description, imageUrl = null) {
 
   if (genAI) {
     try {
-      const prompt = `Jesteś profesjonalnym rzeczoznawcą i fliperem zegarków (przedział budżetowy 100 PLN - 3000 PLN).
+      const prompt = `Jesteś bezwzględnym, doświadczonym rzeczoznawcą i fliperem zegarków (budżet 100 PLN - 3000 PLN). Twój cel to podanie SUCHEJ, REALNEJ WARTOŚCI RYNKOWEJ (Chrono24, Allegro, eBay), aby użytkownik NIE PRZEPŁACIŁ ani grosza.
 
-Przeanalizuj poniższą ofertę oraz oryginalne zdjęcie z aukcji. Twój cel to ocenić zegarek pod kątem handlowym.
+ZASADA ŁĄCZONEJ WYCENY REALNEJ (STAN WIZUALNO-MECHANICZNY + KOMPLETACJA):
+Musisz połączyć stan wizualny/mechaniczny Z KOMPLETEM w jedną spójną cenę rynkową.
+Przykłady kombinacji:
+- Zegarek używany/porysowany + Full Set z certyfikatem => Szacujesz cenę rynkową dokładnie dla używanego egzemplarza w zestawie z Full Setem.
+- Zegarek niesprawny/do serwisu + z pudełkiem/papierami => Szacujesz cenę rynkową uszkodzonego zegarka z tym kompletem.
+- Zegarek idealny/nienoszony + sam zegarek (brak pudełka/papierów) => Szacujesz cenę rynkową dla idealnego zegarka bez kompletu.
+- Zegarek niesprawny + sam zegarek => Szacujesz wartość dawcy części / do naprawy bez kompletu.
 
-Zwróć JEDYNIE czysty format JSON (bez markdown \`\`\`json) z polami:
+Zwróć JEDYNIE czysty format JSON (bez markdown \`\`\`json):
 {
   "marka": "Dokładna marka (np. Seiko, Tissot, Omega, Orient, Citizen, Casio)",
-  "model": "Nazwa modelu / serii (np. PRX, Automatic Diver, Speedtimer, Bambino)",
-  "nr_referencyjny": "Numer referencyjny zegarka (jeśli podany lub rozpoznany ze zdjęcia/opisu, inaczej null)",
-  "sugerowana_szacunkowa_wartosc_pln": 1500 (Twoja szacunkowa rynkowa cena w PLN na podstawie marki/modelu/stanu),
-  "stan": "Ocena stanu (np. 'Nienoszony', 'Bardzo dobry', 'Używany', 'Do naprawy')",
-  "full_set": true/false (true jeśli posiada ZARÓWNO oryginalne pudełko JAK I papiery),
-  "papiery": true/false (true jeśli w opisie/zdjęciu są papiery/certyfikat/gwarancja),
+  "model": "Nazwa modelu / serii (np. PRX, Speedtimer, Bambino)",
+  "nr_referencyjny": "Numer referencyjny (jeśli podany lub rozpoznany, inaczej null)",
+  "sugerowana_szacunkowa_wartosc_pln": 1500 (SUCHA REALNA CENA RYNKOWA w PLN uwzględniająca KROK PO KROKU kombinację stanu i kompletu),
+  "stan": "Ocena stanu (np. 'Nienoszony', 'Bardzo dobry', 'Używany / rysy', 'Niesprawny / do naprawy')",
+  "full_set": true/false (true tylko jeśli posiada ZARÓWNO pudełko JAK I papiery/certyfikat),
+  "papiery": true/false (true jeśli są papiery/certyfikat/gwarancja),
   "pudelko": true/false (true jeśli jest oryginalne pudełko),
-  "sprawny": true/false (true jeśli zegarek jest sprawny na chodzie / trzyma czas, false jeśli uszkodzony/do serwisu),
-  "uwagi_ai": "Krótkie podsumowanie kluczowych zalet lub wad (np. 'Oryginalna bransoleta, czysta tarcza', 'Zarysowanie na szkiełku, sprawny mechanizm')"
+  "sprawny": true/false (true jeśli sprawny na chodzie, false jeśli uszkodzony),
+  "uwagi_ai": "Krótkie, konkretne uzasadnienie wyceny kombinacji (np. 'Model w stanie używanym z rysami, ale obecny Full Set i certyfikat trzyma cenę rynkową na poziomie 1400 PLN')"
 }
 
 Dane aukcji:
@@ -63,9 +69,7 @@ ${combinedText}`;
               }
             });
           }
-        } catch (imgErr) {
-          console.warn('⚠️ Błąd pobierania zdjęcia do analizy Gemini:', imgErr.message);
-        }
+        } catch (imgErr) {}
       }
 
       const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
@@ -84,38 +88,37 @@ ${combinedText}`;
         papiery: Boolean(parsed.papiery),
         pudelko: Boolean(parsed.pudelko),
         sprawny: parsed.sprawny !== undefined ? Boolean(parsed.sprawny) : true,
-        uwagi_ai: parsed.uwagi_ai || 'Brak krytycznych zastrzeżeń'
+        uwagi_ai: parsed.uwagi_ai || 'Ścisła analiza kombinacji stanu i kompletu'
       };
     } catch (err) {
-      console.warn('⚠️ Błąd zapytania do Gemini API (użycie wariantu zapasowego):', err.message);
+      console.warn('⚠️ Błąd zapytania Gemini AI:', err.message);
     }
   }
 
-  // Zapobiegawczy fallback
   const isSet = combinedText.toLowerCase().includes('box') || combinedText.toLowerCase().includes('pudełko');
-  const hasPapers = combinedText.toLowerCase().includes('paper') || combinedText.toLowerCase().includes('papiery') || combinedText.toLowerCase().includes('gwarancja');
-  const isWorking = !combinedText.toLowerCase().includes('uszkodzony') && !combinedText.toLowerCase().includes('do naprawy');
+  const hasPapers = combinedText.toLowerCase().includes('paper') || combinedText.toLowerCase().includes('papiery') || combinedText.toLowerCase().includes('certyfikat');
+  const isWorking = !combinedText.toLowerCase().includes('uszkodzony') && !combinedText.toLowerCase().includes('niesprawny');
 
   return {
     marka: parseBrandFallback(title),
     model: parseModelFallback(title),
     nr_referencyjny: extractRefFallback(combinedText),
     aiEstimatedPrice: null,
-    stan: description?.toLowerCase().includes('nienoszony') ? 'Nienoszony' : 'Bardzo dobry',
+    stan: isWorking ? 'Bardzo dobry' : 'Niesprawny',
     full_set: isSet && hasPapers,
     papiery: hasPapers,
     pudelko: isSet,
     sprawny: isWorking,
-    uwagi_ai: isWorking ? 'Mechanizm sprawny' : 'Może wymagać serwisu'
+    uwagi_ai: isWorking ? 'Mechanizm sprawny' : 'Zegarek niesprawny'
   };
 }
 
 function parseBrandFallback(text) {
-  const brands = ['Seiko', 'Omega', 'Tissot', 'Orient', 'Citizen', 'Casio', 'Tag Heuer', 'Longines', 'Breitling', 'Certina', 'Hamilton'];
+  const brands = ['Seiko', 'Omega', 'Tissot', 'Orient', 'Citizen', 'Casio', 'Tag Heuer', 'Longines', 'Certina', 'Hamilton'];
   for (const b of brands) {
     if (new RegExp(`\\b${b}\\b`, 'i').test(text)) return b;
   }
-  return text.split(' ')[0] || 'Nieznana Marka';
+  return text.split(' ')[0] || 'Zegarek';
 }
 
 function parseModelFallback(text) {
