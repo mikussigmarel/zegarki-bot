@@ -13,6 +13,9 @@ const offerCache = new Map();
 if (token && token !== '123456789:ABCdef...') {
   try {
     bot = new TelegramBot(token, { polling: true });
+    bot.on('polling_error', (err) => {
+      // Wyciszenie spamu 409 Conflict przy podwójnych instancjach (Render + lokalny PC)
+    });
     console.log('🤖 Telegram Bot (@Zegarki_mikusia_bot) uruchomiony w trybie Polling!');
 
     bot.onText(/\/start/, async (msg) => {
