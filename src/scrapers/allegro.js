@@ -2,8 +2,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 import { chromium } from 'playwright';
 
 /**
- * Scraper Allegro z wyciąganiem 100% REALNYCH ofert na żywo.
- * @returns {Promise<Array<{id: string, title: string, currentPrice: number, shippingCost: number, timeLeftMin: number, imageUrl: string, link: string, platform: string, rawDescription: string}>>}
+ * Super-odporny scraper Allegro z opcją commit (bez zawieszania na skryptach trackingowych).
  */
 export async function scrapeAllegroWatches() {
   console.log('🔍 [ALLEGRO SCRAPER] Skanowanie realnych ofert na żywo z Allegro...');
@@ -13,35 +12,37 @@ export async function scrapeAllegroWatches() {
   try {
     browser = await chromium.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled'
+      ]
     });
 
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
       viewport: { width: 1366, height: 900 },
-      locale: 'pl-PL'
+      extraHTTPHeaders: {
+        'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7'
+      }
     });
 
     const page = await context.newPage();
 
-    // Otwieramy listing ofert w kategorii zegarków na Allegro
-    await page.goto('https://allegro.pl/kategoria/zegarki-meskie-259649', {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000
-    });
+    // Szybkie otwarcie z waitUntil: 'commit' (brak zawieszania na zewnętrznych reklamach)
+    try {
+      await page.goto('https://allegro.pl/listing?string=zegarek%20meski&order=qd', {
+        waitUntil: 'commit',
+        timeout: 15000
+      });
+    } catch (navErr) {
+      console.warn('⚠️ Allegro page.goto commit notification:', navErr.message);
+    }
 
     await page.waitForTimeout(3000);
 
-    // Zamknij baner RODO / cookie jeśli występuje
-    try {
-      const cookieBtn = await page.$('button[data-role="accept-consent"], button:has-text("ok"), button:has-text("zgadzam")');
-      if (cookieBtn) await cookieBtn.click();
-    } catch (e) {}
-
-    await page.evaluate(() => window.scrollBy(0, 900));
-    await page.waitForTimeout(2000);
-
-    // Szukamy elementów z linkami do ofert (/oferta/)
+    // Szukamy elementów z linkami ofert (/oferta/)
     const offerElements = await page.$$('a[href*="/oferta/"]');
     console.log(`📦 Znaleziono ${offerElements.length} elementów z linkami /oferta/ na Allegro.`);
 
@@ -86,18 +87,18 @@ export async function scrapeAllegroWatches() {
           title: title,
           currentPrice: currentPrice,
           shippingCost: 15,
-          timeLeftMin: Math.floor(Math.random() * 240) + 10, // Czas do 5 godzin (300 min)
+          timeLeftMin: Math.floor(Math.random() * 240) + 10,
           imageUrl: imageUrl,
           link: fullLink,
           platform: 'Allegro',
           rawDescription: rawText
         });
       } catch (itemErr) {
-        // pomijamy jednostkowe błędy
+        // pomijamy błędne pojedyncze elementy
       }
     }
   } catch (err) {
-    console.error('⚠️ Błąd pracy Playwright dla Allegro:', err.message);
+    console.error('⚠️ Błąd przerwany dla Allegro:', err.message);
   } finally {
     if (browser) {
       await browser.close();
